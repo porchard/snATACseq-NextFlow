@@ -10,6 +10,7 @@ parser = argparse.ArgumentParser(description='', add_help = True)
 parser.add_argument('bed', type = str,  help = 'BED file to sort')
 parser.add_argument('bam', type = str,  help = 'BAM file (should be coordinate sorted).')
 parser.add_argument('--use-header', dest = 'use_header', action = 'store_true', default = False, help = 'Infer the bam sort order from the header')
+parser.add_argument('--drop-missing', dest = 'drop_missing', action = 'store_true', default = False, help = 'Drop chromosomes missing from the bam file from the bed file.')
 args = parser.parse_args()
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s: %(message)s')
@@ -50,9 +51,15 @@ for chrom in sort_order:
 missing_chromosomes = bed.filter(lambda i: i.chrom not in chromosomes).saveas()
 if len(missing_chromosomes) > 0:
     missing = set()
-    for i in missing_chromosomes.sort():
-        print(str(i).rstrip())
-    logging.info('Printed chromosomes {} (missing from the bam file) at the end of the bed file.'.format(', '.join(list(missing))))
+    if not args.drop_missing:
+        for i in missing_chromosomes.sort():
+            print(str(i).rstrip())
+            missing.add(i.chrom)
+        logging.info('Printed chromosomes {} (missing from the bam file) at the end of the bed file.'.format(', '.join(list(missing))))
+    else:
+        for i in missing_chromosomes.sort():
+            missing.add(i.chrom)
+        logging.info('Dropped chromosomes {} (missing from the bam file).'.format(', '.join(list(missing))))
 
 
 logging.info('Done')

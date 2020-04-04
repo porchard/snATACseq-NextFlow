@@ -376,7 +376,7 @@ process gene_count_matrix {
 
 	"""
 	cat ${get_gene_bed(genome)} | sort -k1V,1 -k2n,2 > genes.sorted.bed
-	sort-bed-by-bam.py genes.sorted.bed $bam > genes.sorted_by_bam.bed
+	sort-bed-by-bam.py --drop-missing genes.sorted.bed $bam > genes.sorted_by_bam.bed
 	bedtools intersect -wa -wb -bed -sorted -a $bam -b genes.sorted_by_bam.bed | cut -f4,16 | perl -pe 's@.*_(.*)/\\d+\\t(.*)@\$1\\t\$2@' | sort --parallel=10 -S 20G | uniq -c > counts.bed
 	cat counts.bed | perl -pe 's/^\\s+//; s/\\s+/\\t/' | awk '{print(\$2, \$3, \$1)}' | perl -pe 's/ /\\t/g' | sort --parallel=10 -S 20G -k1,1 -k2,2 | bedtools groupby -g 1,2 -c 3 -o sum | perl -pe 's/^/${library}-${genome}\t/' > ${library}-${genome}.counts.txt
 	"""
