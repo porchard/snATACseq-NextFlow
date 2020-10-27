@@ -80,8 +80,8 @@ library_and_readgroup_to_fastqs = {
 }
 
 
-trim_in = []
-make_barcode_corrections_in = []
+trim_in_inserts = []
+transform_barcode_in = []
 fastqc_in = []
 
 for (library in libraries) {
@@ -90,8 +90,8 @@ for (library in libraries) {
 		first_insert = fastqs['1']
 		second_insert = fastqs['2']
 		barcode = fastqs['index']
-		trim_in << [library, readgroup, file(first_insert), file(second_insert), file(barcode)]
-		make_barcode_corrections_in << [library, file(barcode)]
+		transform_barcode_in << [library, readgroup, file(barcode)]
+		trim_in_inserts << [library, readgroup, file(first_insert), file(second_insert)]
 		fastqc_in << [library, readgroup, "1", file(first_insert)]
 		fastqc_in << [library, readgroup, "2", file(second_insert)]
 		fastqc_in << [library, readgroup, "barcode", file(barcode)]
@@ -120,7 +120,28 @@ process fastqc {
 
 }
 
-make_barcode_corrections_in_chan = Channel.from(make_barcode_corrections_in).groupTuple(sort: true)
+// Trim/reverse complement barcode if necessary. Necessary transformation inferred based on naive comparison of barcode read to barcode whitelist.
+process transform_barcode {
+	
+	publishDir "${params.results}/transformed-barcodes", mode: 'rellink'
+	tag "${library}-${readgroup}"
+	memory '10 GB'
+
+	input:
+	set val(library), val(readgroup), file(fastq) from Channel.from(transform_barcode_in)
+
+	output:
+	set val(library), val(readgroup), file("${library}___${readgroup}.transformed-barcode.fastq.gz") into trim_in_barcode
+	set val(library), file("${library}___${readgroup}.transformed-barcode.fastq.gz") into make_barcode_corrections_in
+
+	"""
+	${IONICE} transform-barcode.py --check-first 10000000 $fastq ${params['barcode-whitelist']} | gzip -c > ${library}___${readgroup}.transformed-barcode.fastq.gz
+	"""
+
+}
+
+trim_in = Channel.from(trim_in_inserts).combine(trim_in_barcode, by: [0, 1])
+make_barcode_corrections_in_chan = make_barcode_corrections_in.groupTuple(sort: true)
 
 process make_barcode_corrections {
 	
@@ -151,7 +172,7 @@ process trim {
 	tag "${library}-${readgroup}"
 
 	input:
-	set val(library), val(readgroup), file(fastq_1), file(fastq_2), file(barcode) from Channel.from(trim_in)
+	set val(library), val(readgroup), file(fastq_1), file(fastq_2), file(barcode) from trim_in
 
 	output:
 	set val(library), val(readgroup), file("${library}-${readgroup}.1.trimmed.fastq.gz"), file("${library}-${readgroup}.2.trimmed.fastq.gz") into trim_out_chan
