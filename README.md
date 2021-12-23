@@ -8,7 +8,7 @@ Otherwise, you'll need to have the following installed:
 2. bwa
 3. picardtools
 4. fastqc
-5. samtools
+5. samtools (v. 1.10 or above)
 6. pysam
 7. ataqv
 8. cta (the forked version on the porchard GitHub)

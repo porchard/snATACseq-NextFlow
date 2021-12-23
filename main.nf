@@ -322,6 +322,9 @@ process merge_readgroups {
 
 process filter_nuclei_with_low_read_counts {
 
+    cpus 10
+    memory '25 GB'
+
     input:
     set val(library), val(genome), file(bam) from merge_out
 
@@ -329,7 +332,9 @@ process filter_nuclei_with_low_read_counts {
     set val(library), val(genome), file("${library}-${genome}.filtered.bam") into markduplicates_in
 
     """
-    filter-nuclei-with-low-read-counts.py --min-reads ${params.low_read_count_threshold} $bam ${library}-${genome}.filtered.bam
+    samtools view $bam | perl -pe 's/.*(CB:Z:.*?)\\s+.*/\$1\\n/' | grep CB | perl -pe 's/.*://' | sort --parallel=10 -S 20G | uniq -c > counts.txt
+    cat counts.txt | awk '\$1>=${params.low_read_count_threshold}' | perl -pe 's/^\\s+\\d+\\s//' > cb-keep.txt
+    samtools view -h -b -D CB:cb-keep.txt $bam > ${library}-${genome}.filtered.bam
     """
 
 }
