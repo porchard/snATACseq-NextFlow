@@ -1,6 +1,7 @@
 #!/usr/bin/env nextflow
 
 IONICE = 'ionice -c2 -n7'
+params.chunks = 1
 
 // Generic data
 AUTOSOMAL_REFERENCES = ['hg19': (1..22).collect({it -> 'chr' + it}),
@@ -83,6 +84,8 @@ library_and_readgroup_to_fastqs = {
 trim_in_inserts = []
 transform_barcode_in = []
 fastqc_in = []
+chunk_fastq_in = []
+no_chunk_fastq_in = []
 
 for (library in libraries) {
     for (readgroup in library_to_readgroups(library)) {
@@ -90,8 +93,15 @@ for (library in libraries) {
         first_insert = fastqs['1']
         second_insert = fastqs['2']
         barcode = fastqs['index']
-        transform_barcode_in << [library, readgroup, file(barcode)]
-        trim_in_inserts << [library, readgroup, file(first_insert), file(second_insert)]
+        if (params.chunks > 1) {
+            chunk_fastq_in << [library, readgroup, "barcode", file(barcode)]
+            chunk_fastq_in << [library, readgroup, "1", file(first_insert)]
+            chunk_fastq_in << [library, readgroup, "2", file(second_insert)]
+        } else {
+            no_chunk_fastq_in << [library, readgroup, "barcode", file(barcode)]
+            no_chunk_fastq_in << [library, readgroup, "1", file(first_insert)]
+            no_chunk_fastq_in << [library, readgroup, "2", file(second_insert)]
+        }
         fastqc_in << [library, readgroup, "1", file(first_insert)]
         fastqc_in << [library, readgroup, "2", file(second_insert)]
         fastqc_in << [library, readgroup, "barcode", file(barcode)]
@@ -120,31 +130,60 @@ process fastqc {
 
 }
 
+
+process chunk_fastq {
+
+    maxForks 10
+    time '24h'
+
+    input:
+    set val(library), val(readgroup), val(read), file(fastq) from Channel.from(chunk_fastq_in)
+
+    output:
+    set val(library), val(readgroup), val(read), file("*.fastq") into chunked
+
+    when:
+    params.chunks > 1
+
+    """
+    chunk-fastq.py $fastq ${params.chunks} ${library}___${readgroup}.${read}.
+    """
+
+}
+
+inserts = Channel.create()
+first_insert = Channel.create()
+second_insert = Channel.create()
+barcodes = Channel.create()
+
+chunked.transpose().map({it -> [it[0], it[1], it[3].getName().replaceAll(it[0] + "___" + it[1] + "." + it[2] + ".", '').replaceAll('.fastq', ''), it[2], it[3]]}).map({it -> [it[0], it[1] + "___" + it[2], it[3], it[4]]}).mix(Channel.from(no_chunk_fastq_in)).choice(inserts, barcodes) { it -> it[2] == 'barcode' ? 1 : 0 }
+inserts.choice(first_insert, second_insert) { it -> it[2] == '1' ? 0 : 1 }
+
 // Trim/reverse complement barcode if necessary. Necessary transformation inferred based on naive comparison of barcode read to barcode whitelist.
 process transform_barcode {
-    
+
     publishDir "${params.results}/transformed-barcodes", mode: 'rellink'
     tag "${library}-${readgroup}"
     memory '10 GB'
 
     input:
-    set val(library), val(readgroup), file(fastq) from Channel.from(transform_barcode_in)
+    set val(library), val(readgroup), val(read), file(fastq) from barcodes
 
     output:
     set val(library), val(readgroup), file("${library}___${readgroup}.transformed-barcode.fastq.gz") into trim_in_barcode
     set val(library), file("${library}___${readgroup}.transformed-barcode.fastq.gz") into make_barcode_corrections_in
 
     """
-    ${IONICE} transform-barcode.py --check-first 10000000 $fastq ${params['barcode-whitelist']} | gzip -c > ${library}___${readgroup}.transformed-barcode.fastq.gz
+    ${IONICE} transform-barcode-maybe-gzip.py --check-first 1000000 $fastq ${params['barcode-whitelist']} | gzip -c > ${library}___${readgroup}.transformed-barcode.fastq.gz
     """
 
 }
 
-trim_in = Channel.from(trim_in_inserts).combine(trim_in_barcode, by: [0, 1])
+trim_in = first_insert.map({it -> [it[0], it[1], it[3]]}).combine(second_insert.map({it -> [it[0], it[1], it[3]]}), by: [0, 1]).combine(trim_in_barcode, by: [0, 1])
 make_barcode_corrections_in_chan = make_barcode_corrections_in.groupTuple(sort: true)
 
 process make_barcode_corrections {
-    
+
     publishDir "${params.results}/corrected-barcodes", mode: 'rellink', overwrite: true
     tag "${library}"
     cpus 3
@@ -210,9 +249,9 @@ process fastqc_post_trim {
 
 tmp = []
 for (library in libraries) {
-    for(genome in get_genome(library)){ 
+    for(genome in get_genome(library)){
         tmp << [library, genome]
-    }    
+    }
 }
 
 map_in_chan = Channel.from(tmp).combine(map_in_chan, by: 0)
@@ -267,7 +306,7 @@ process merge_readgroups {
 
     time '24h'
     publishDir "${params.results}/merge", mode: 'rellink', overwrite: true
-    
+
     input:
     set val(library), val(genome), file(bams) from correct_barcodes_in_bam_out.groupTuple(by: [0, 1], sort: true)
 
