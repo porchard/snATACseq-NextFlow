@@ -22,8 +22,7 @@ Paths to various generic files (e.g., bwa indices) must be included in the nextf
 2. Chrom size files for each genome
 3. BWA indices
 4. TSS files (BED6 files denoting TSS positions)
-5. Gene bed files (BED4 files; included because we get per-gene read counts for use with LIGER in downstream processing). You probably want these to represent gene bodies + promoters if you plan to use these with LIGER.
-6. Path to the barcode whitelist (the 10X whitelist is included in this repo)
+5. Path to the barcode whitelist (the 10X whitelist is included in this repo)
 
 You'll also need to set the params.results variable -- either in the nextflow.config file itself, or on the command line when you run the pipeline ('--results /path/to/results').
 

@@ -347,7 +347,7 @@ process prune {
     set val(library), val(genome), file(md_bam), file(bam_index) from prune_in
 
     output:
-    set val(library), val(genome), file("${library}-${genome}.pruned.bam") into prune_out
+    set val(library), val(genome), file("${library}-${genome}.pruned.bam")
 
     """
     ${IONICE} samtools view -h -b -f 3 -F 4 -F 8 -F 256 -F 1024 -F 2048 -q 30 $md_bam ${AUTOSOMAL_REFERENCES[genome].join(' ')} > ${library}-${genome}.unsorted.bam 
@@ -374,32 +374,5 @@ process ataqv {
     """
     ${IONICE} ataqv --name ${library}-${genome} --metrics-file ${library}-${genome}.ataqv.json.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}.ataqv.out
     """    
-
-}
-
-
-process gene_count_matrix {
-    
-    memory '40 GB'
-    maxRetries 1
-    cpus 10
-    time '24h'
-    errorStrategy 'retry'
-    cache false
-
-    publishDir "${params.results}/gene-counts", mode: 'rellink', overwrite: true
-
-    input:
-    set val(library), val(genome), file(bam) from prune_out
-
-    output:
-    set val(library), val(genome), file("${library}-${genome}.counts.txt")
-
-    """
-    cat ${get_gene_bed(genome)} | sort -k1V,1 -k2n,2 > genes.sorted.bed
-    sort-bed-by-bam.py --drop-missing genes.sorted.bed $bam > genes.sorted_by_bam.bed
-    bedtools intersect -wa -wb -bed -sorted -a $bam -b genes.sorted_by_bam.bed | cut -f4,16 | perl -pe 's@.*_(.*)/\\d+\\t(.*)@\$1\\t\$2@' | sort --parallel=10 -S 20G | uniq -c > counts.bed
-    cat counts.bed | perl -pe 's/^\\s+//; s/\\s+/\\t/' | awk '{print(\$2, \$3, \$1)}' | perl -pe 's/ /\\t/g' | sort --parallel=10 -S 20G -k1,1 -k2,2 | bedtools groupby -g 1,2 -c 3 -o sum | perl -pe 's/^/${library}-${genome}\t/' > ${library}-${genome}.counts.txt
-    """
 
 }
