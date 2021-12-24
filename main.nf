@@ -1,7 +1,9 @@
 #!/usr/bin/env nextflow
 
-IONICE = 'ionice -c2 -n7'
+nextflow.enable.dsl=2
 params.chunks = 1
+
+IONICE = 'ionice -c2 -n7'
 
 // Generic data
 AUTOSOMAL_REFERENCES = ['hg19': (1..22).collect({it -> 'chr' + it}),
@@ -19,93 +21,49 @@ ORGANISMS = ['hg19': 'human',
         'mm9': 'mouse',
         'mm10': 'mouse']
 
-libraries = params.libraries.keySet()
 
-make_excluded_regions_arg = {
-    genome ->
+def make_excluded_regions_arg (genome) {
     return params.blacklist[genome].collect({'--excluded-region-file ' + it}).join(' ')
 }
 
 
-is_chimeric = {
-    library ->
+def is_chimeric (library) {
     return get_genome(library).size() > 1
 }
 
 
-get_bwa_index = {
-    genome ->
+def get_bwa_index (genome) {
     params.bwa_index[genome]
 }
 
 
-get_genome = {
-    library ->
+def get_genome (library) {
     params.libraries[library].genome
 }
 
 
-get_tss = {
-    genome ->
+def get_tss (genome) {
     params.tss[genome]
 }
 
 
-get_organism = {
-    genome ->
+def get_organism (genome) {
     ORGANISMS[genome]
 }
 
 
-get_chrom_sizes = {
-    genome ->
+def get_chrom_sizes (genome) {
     params.chrom_sizes[genome]
 }
 
 
-get_gene_bed = {
-    genome ->
-    params.gene_bed[genome]
-}
-
-
-library_to_readgroups = {
-    library ->
+def library_to_readgroups (library) {
     params.libraries[library].readgroups.keySet()
 }
 
 
-library_and_readgroup_to_fastqs = {
-    library, readgroup ->
+def library_and_readgroup_to_fastqs (library, readgroup) {
     params.libraries[library].readgroups[readgroup]
-}
-
-
-trim_in_inserts = []
-transform_barcode_in = []
-fastqc_in = []
-chunk_fastq_in = []
-no_chunk_fastq_in = []
-
-for (library in libraries) {
-    for (readgroup in library_to_readgroups(library)) {
-        fastqs = library_and_readgroup_to_fastqs(library, readgroup)
-        first_insert = fastqs['1']
-        second_insert = fastqs['2']
-        barcode = fastqs['index']
-        if (params.chunks > 1) {
-            chunk_fastq_in << [library, readgroup, "barcode", file(barcode)]
-            chunk_fastq_in << [library, readgroup, "1", file(first_insert)]
-            chunk_fastq_in << [library, readgroup, "2", file(second_insert)]
-        } else {
-            no_chunk_fastq_in << [library, readgroup, "barcode", file(barcode)]
-            no_chunk_fastq_in << [library, readgroup, "1", file(first_insert)]
-            no_chunk_fastq_in << [library, readgroup, "2", file(second_insert)]
-        }
-        fastqc_in << [library, readgroup, "1", file(first_insert)]
-        fastqc_in << [library, readgroup, "2", file(second_insert)]
-        fastqc_in << [library, readgroup, "barcode", file(barcode)]
-    }
 }
 
 
@@ -115,10 +73,10 @@ process fastqc {
     time '24h'
 
     input:
-    set val(library), val(readgroup), val(read), file(fastq) from Channel.from(fastqc_in)
+    tuple val(library), val(readgroup), val(read), path(fastq)
 
     output:
-    set file(outfile_1), file(outfile_2)
+    tuple path(outfile_1), path(outfile_2)
 
     script:
     outfile_1 = fastq.getName().replaceAll('.fastq.gz', '_fastqc.html')
@@ -130,17 +88,17 @@ process fastqc {
 
 }
 
-
+//{args.prefix}chunk_{chunk}.fastq --> ${library}___${readgroup}.${read}.chunk_${chunk}.fastq
 process chunk_fastq {
 
     maxForks 10
     time '24h'
 
     input:
-    set val(library), val(readgroup), val(read), file(fastq) from Channel.from(chunk_fastq_in)
+    tuple val(library), val(readgroup), val(read), path(fastq)
 
     output:
-    set val(library), val(readgroup), val(read), file("*.fastq") into chunked
+    tuple val(library), val(readgroup), val(read), path("*.fastq")
 
     when:
     params.chunks > 1
@@ -151,14 +109,6 @@ process chunk_fastq {
 
 }
 
-inserts = Channel.create()
-first_insert = Channel.create()
-second_insert = Channel.create()
-barcodes = Channel.create()
-
-chunked.transpose().map({it -> [it[0], it[1], it[3].getName().replaceAll(it[0] + "___" + it[1] + "." + it[2] + ".", '').replaceAll('.fastq', ''), it[2], it[3]]}).map({it -> [it[0], it[1] + "___" + it[2], it[3], it[4]]}).mix(Channel.from(no_chunk_fastq_in)).choice(inserts, barcodes) { it -> it[2] == 'barcode' ? 1 : 0 }
-inserts.choice(first_insert, second_insert) { it -> it[2] == '1' ? 0 : 1 }
-
 // Trim/reverse complement barcode if necessary. Necessary transformation inferred based on naive comparison of barcode read to barcode whitelist.
 process transform_barcode {
 
@@ -167,11 +117,10 @@ process transform_barcode {
     memory '10 GB'
 
     input:
-    set val(library), val(readgroup), val(read), file(fastq) from barcodes
+    tuple val(library), val(readgroup), path(fastq)
 
     output:
-    set val(library), val(readgroup), file("${library}___${readgroup}.transformed-barcode.fastq.gz") into trim_in_barcode
-    set val(library), file("${library}___${readgroup}.transformed-barcode.fastq.gz") into make_barcode_corrections_in
+    tuple val(library), val(readgroup), path("${library}___${readgroup}.transformed-barcode.fastq.gz")
 
     """
     ${IONICE} transform-barcode-maybe-gzip.py --check-first 1000000 $fastq ${params['barcode-whitelist']} | gzip -c > ${library}___${readgroup}.transformed-barcode.fastq.gz
@@ -179,8 +128,6 @@ process transform_barcode {
 
 }
 
-trim_in = first_insert.map({it -> [it[0], it[1], it[3]]}).combine(second_insert.map({it -> [it[0], it[1], it[3]]}), by: [0, 1]).combine(trim_in_barcode, by: [0, 1])
-make_barcode_corrections_in_chan = make_barcode_corrections_in.groupTuple(sort: true)
 
 process make_barcode_corrections {
 
@@ -190,10 +137,10 @@ process make_barcode_corrections {
     memory '10 GB'
 
     input:
-    set val(library), file(barcode_fastq) from make_barcode_corrections_in_chan
+    tuple val(library), path(barcode_fastq)
 
     output:
-    set val(library), file("${library}.barcode_corrections.txt") into make_barcode_corrections_out_chan
+    tuple val(library), path("${library}.barcode_corrections.txt")
 
     """
     ${IONICE} correct-barcodes.py --threads 3 ${params['barcode-whitelist']} ${barcode_fastq.join(' ')} > ${library}.barcode_corrections.txt
@@ -211,10 +158,10 @@ process trim {
     tag "${library}-${readgroup}"
 
     input:
-    set val(library), val(readgroup), file(fastq_1), file(fastq_2), file(barcode) from trim_in
+    tuple val(library), val(readgroup), path(fastq_1), path(fastq_2), path(barcode)
 
     output:
-    set val(library), val(readgroup), file("${library}-${readgroup}.1.trimmed.fastq.gz"), file("${library}-${readgroup}.2.trimmed.fastq.gz") into trim_out_chan
+    tuple val(library), val(readgroup), path("${library}-${readgroup}.1.trimmed.fastq.gz"), path("${library}-${readgroup}.2.trimmed.fastq.gz")
 
     """
     ${IONICE} cta --append-barcode $barcode $fastq_1 $fastq_2 ${library}-${readgroup}.1.trimmed.fastq.gz ${library}-${readgroup}.2.trimmed.fastq.gz
@@ -223,19 +170,16 @@ process trim {
 }
 
 
-trim_out_chan.into{fastqc_post_trim_in; map_in_chan}
-fastqc_post_trim_in = fastqc_post_trim_in.map({it -> [it[0], it[1], ['1', '2'], [it[2], it[3]]]}).transpose()
-
 process fastqc_post_trim {
 
     publishDir "${params.results}/fastqc/after-trim", mode: 'rellink', overwrite: true
     time '24h'
 
     input:
-    set val(library), val(readgroup), val(read), file(fastq) from fastqc_post_trim_in
+    tuple val(library), val(readgroup), val(read), path(fastq)
 
     output:
-    set file(outfile_1), file(outfile_2)
+    tuple path(outfile_1), path(outfile_2)
 
     script:
     outfile_1 = fastq.getName().replaceAll('.fastq.gz', '_fastqc.html')
@@ -247,16 +191,8 @@ process fastqc_post_trim {
 
 }
 
-tmp = []
-for (library in libraries) {
-    for(genome in get_genome(library)){
-        tmp << [library, genome]
-    }
-}
 
-map_in_chan = Channel.from(tmp).combine(map_in_chan, by: 0)
-
-process map {
+process bwa {
 
     memory '50 GB'
     cpus 12
@@ -268,10 +204,10 @@ process map {
     publishDir "${params.results}/bwa", mode: 'rellink', overwrite: true
 
     input:
-    set val(library), val(genome), val(readgroup), file(fastq_1), file(fastq_2) from map_in_chan
+    tuple val(library), val(genome), val(readgroup), path(fastq_1), path(fastq_2)
 
     output:
-    set val(library), val(readgroup), val(genome), file("${library}-${readgroup}-${genome}.bam") into map_out_chan
+    tuple val(library), val(readgroup), val(genome), path("${library}-${readgroup}-${genome}.bam")
 
     """
     bwa mem -I 200,200,5000 -M -t 12 ${get_bwa_index(genome)} ${fastq_1} ${fastq_2} | samtools sort -m 1g -@ 11 -O bam -T sort_tmp -o ${library}-${readgroup}-${genome}.bam -
@@ -279,8 +215,6 @@ process map {
 
 }
 
-
-correct_barcodes_in_bam_in = map_out_chan.combine(make_barcode_corrections_out_chan, by: 0)
 
 process correct_barcodes_in_bam {
 
@@ -290,10 +224,10 @@ process correct_barcodes_in_bam {
     time '24h'
 
     input:
-    set val(library), val(readgroup), val(genome), file(bam), file(corrections) from correct_barcodes_in_bam_in
+    tuple val(library), val(readgroup), val(genome), path(bam), path(corrections)
 
     output:
-    set val(library), val(genome), file("${library}-${readgroup}-${genome}.corrected.bam") into correct_barcodes_in_bam_out
+    tuple val(library), val(genome), path("${library}-${readgroup}-${genome}.corrected.bam")
 
     """
     correct-barcodes-in-bam.py $bam $corrections ${library}-${readgroup}-${genome}.corrected.bam
@@ -308,10 +242,10 @@ process merge_readgroups {
     publishDir "${params.results}/merge", mode: 'rellink', overwrite: true
 
     input:
-    set val(library), val(genome), file(bams) from correct_barcodes_in_bam_out.groupTuple(by: [0, 1], sort: true)
+    tuple val(library), val(genome), path(bams)
 
     output:
-    set val(library), val(genome), file("${library}-${genome}.bam") into merge_out
+    tuple val(library), val(genome), path("${library}-${genome}.bam")
 
     """
     samtools merge ${library}-${genome}.bam ${bams.join(' ')}
@@ -326,10 +260,10 @@ process filter_nuclei_with_low_read_counts {
     memory '25 GB'
 
     input:
-    set val(library), val(genome), file(bam) from merge_out
+    tuple val(library), val(genome), path(bam)
 
     output:
-    set val(library), val(genome), file("${library}-${genome}.filtered.bam") into markduplicates_in
+    tuple val(library), val(genome), path("${library}-${genome}.filtered.bam")
 
     """
     samtools view $bam | perl -pe 's/.*(CB:Z:.*?)\\s+.*/\$1\\n/' | grep CB | perl -pe 's/.*://' | sort --parallel=10 -S 20G | uniq -c > counts.txt
@@ -349,15 +283,13 @@ process mark_duplicates {
     memory '50 GB'
 
     input:
-    set val(library), val(genome), file("${library}-${genome}.bam") from markduplicates_in
+    tuple val(library), val(genome), path("${library}-${genome}.bam")
 
     output:
-    set val(library), val(genome), file("${library}-${genome}.md.bam"), file("${library}-${genome}.md.bam.bai") into prune_in
-    set val(library), val(genome), file("${library}-${genome}.md.bam"), file("${library}-${genome}.md.bam.bai") into ataqv_in
+    tuple val(library), val(genome), path("${library}-${genome}.md.bam"), path("${library}-${genome}.md.bam.bai")
 
     """
-    java -Xmx40g -Xms40g -jar \$PICARD_JAR MarkDuplicates TMP_DIR=. I=${library}-${genome}.bam O=${library}-${genome}.md.bam READ_ONE_BARCODE_TAG=CB READ_TWO_BARCODE_TAG=CB ASSUME_SORTED=true MAX_RECORDS_IN_RAM=100000000 METRICS_FILE=${library}-${genome}.metrics VALIDATION_STRINGENCY=LENIENT
-    samtools index ${library}-${genome}.md.bam
+    java -Xmx40g -Xms40g -jar \$PICARD_JAR MarkDuplicates TMP_DIR=. I=${library}-${genome}.bam O=${library}-${genome}.md.bam READ_ONE_BARCODE_TAG=CB READ_TWO_BARCODE_TAG=CB ASSUME_SORTED=true MAX_RECORDS_IN_RAM=100000000 METRICS_FILE=${library}-${genome}.metrics VALIDATION_STRINGENCY=LENIENT && samtools index ${library}-${genome}.md.bam
     """
 
 }
@@ -372,14 +304,13 @@ process prune {
     maxRetries 2
 
     input:
-    set val(library), val(genome), file(md_bam), file(bam_index) from prune_in
+    tuple val(library), val(genome), path(md_bam), path(bam_index)
 
     output:
-    set val(library), val(genome), file("${library}-${genome}.pruned.bam")
+    tuple val(library), val(genome), path("${library}-${genome}.pruned.bam")
 
     """
-    ${IONICE} samtools view -h -b -f 3 -F 4 -F 8 -F 256 -F 1024 -F 2048 -q 30 $md_bam ${AUTOSOMAL_REFERENCES[genome].join(' ')} > ${library}-${genome}.unsorted.bam
-    samtools sort -m 2G -o ${library}-${genome}.pruned.bam -T bam-sort -O BAM ${library}-${genome}.unsorted.bam
+    ${IONICE} samtools view -h -b -f 3 -F 4 -F 8 -F 256 -F 1024 -F 2048 -q 30 $md_bam ${AUTOSOMAL_REFERENCES[genome].join(' ')} > ${library}-${genome}.unsorted.bam && samtools sort -m 2G -o ${library}-${genome}.pruned.bam -T bam-sort -O BAM ${library}-${genome}.unsorted.bam
     """
 
 }
@@ -394,13 +325,77 @@ process ataqv {
     time '10h'
 
     input:
-    set val(library), val(genome), file(md_bam), file(bam_index) from ataqv_in
+    tuple val(library), val(genome), path(md_bam), path(bam_index)
 
     output:
-    set file("${library}-${genome}.ataqv.json.gz"), file("${library}-${genome}.ataqv.out")
+    tuple path("${library}-${genome}.ataqv.json.gz"), path("${library}-${genome}.ataqv.out")
 
     """
     ${IONICE} ataqv --name ${library}-${genome} --ignore-read-groups --nucleus-barcode-tag CB --metrics-file ${library}-${genome}.ataqv.json.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}.ataqv.out
     """
 
+}
+
+workflow {
+
+    libraries = params.libraries.keySet()
+
+    trim_in_inserts = []
+    transform_barcode_in = []
+    fastqc_in = []
+    chunk_fastq_in = []
+    no_chunk_fastq_in = []
+
+    for (library in libraries) {
+        for (readgroup in library_to_readgroups(library)) {
+            fastqs = library_and_readgroup_to_fastqs(library, readgroup)
+            first_insert = fastqs['1']
+            second_insert = fastqs['2']
+            barcode = fastqs['index']
+            if (params.chunks > 1) {
+                chunk_fastq_in << [library, readgroup, "barcode", file(barcode)]
+                chunk_fastq_in << [library, readgroup, "1", file(first_insert)]
+                chunk_fastq_in << [library, readgroup, "2", file(second_insert)]
+            } else {
+                no_chunk_fastq_in << [library, readgroup, "barcode", file(barcode)]
+                no_chunk_fastq_in << [library, readgroup, "1", file(first_insert)]
+                no_chunk_fastq_in << [library, readgroup, "2", file(second_insert)]
+            }
+            fastqc_in << [library, readgroup, "1", file(first_insert)]
+            fastqc_in << [library, readgroup, "2", file(second_insert)]
+            fastqc_in << [library, readgroup, "barcode", file(barcode)]
+        }
+    }
+
+    fastqc(Channel.from(fastqc_in))
+
+    // handle the chunking
+    chunked_out = chunk_fastq(Channel.from(chunk_fastq_in)).transpose().map({it -> [it[0], it[1] + "___" + it[3].getName().tokenize('.')[-2], it[2], it[3]]}) // library, {readgroup}___{chunk}, read, file
+    fastq_in = chunked_out.mix(Channel.from(no_chunk_fastq_in))
+    first_insert = fastq_in.filter({it -> it[2] == '1'}).map({it -> [it[0], it[1], it[3]]}) // library, readgroup, file
+    second_insert = fastq_in.filter({it -> it[2] == '2'}).map({it -> [it[0], it[1], it[3]]}) // library, readgroup, file
+    barcodes = fastq_in.filter({it -> it[2] == 'barcode'}).map({it -> [it[0], it[1], it[3]]}) // library, readgroup, file
+    
+    transformed_barcodes = transform_barcode(barcodes) //  library, readgroup, file
+    corrected_barcodes = transformed_barcodes.map({it -> [it[0], it[2]]}).groupTuple(sort: true) | make_barcode_corrections
+    trimmed = first_insert.combine(second_insert, by: [0, 1]).combine(transformed_barcodes, by: [0, 1]) | trim // library, readgroup, fastq1, fastq2
+    
+    // fastqc on trimmed barcodes
+    trimmed.map({it -> [it[0], it[1], ['1', '2'], [it[2], it[3]]]}).transpose() | fastqc_post_trim
+
+    // map
+    tmp = []
+    for (library in libraries) {
+        for(genome in get_genome(library)){
+            tmp << [library, genome]
+        }
+    }
+
+    mapped = Channel.from(tmp).combine(trimmed, by: 0) | bwa // tuple val(library), val(readgroup), val(genome), path("${library}-${readgroup}-${genome}.bam")
+
+    // 
+    bam_barcodes_corrected = mapped.combine(corrected_barcodes, by: 0) | correct_barcodes_in_bam // tuple val(library), val(genome), path("${library}-${readgroup}-${genome}.corrected.bam")
+    md_bams = bam_barcodes_corrected.groupTuple(by: [0, 1], sort: true) | merge_readgroups | filter_nuclei_with_low_read_counts | mark_duplicates // val(library), val(genome), path(bam), path(index)
+    prune(md_bams)
+    ataqv(md_bams)
 }

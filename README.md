@@ -13,7 +13,7 @@ Otherwise, you'll need to have the following installed:
 7. ataqv (v. 1.3.0 or above)
 8. cta (the forked version on the porchard GitHub)
 
-I've used this pipeline with NextFlow v. 19.04.1
+I've used this pipeline with NextFlow v. 20.10.0
 
 ## Configuration
 Paths to various generic files (e.g., bwa indices) must be included in the nextflow.config file -- check that file and change paths accordingly. These include:
