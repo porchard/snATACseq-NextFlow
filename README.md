@@ -10,7 +10,7 @@ Otherwise, you'll need to have the following installed:
 4. fastqc
 5. samtools (v. 1.10 or above)
 6. pysam
-7. ataqv
+7. ataqv (v. 1.3.0 or above)
 8. cta (the forked version on the porchard GitHub)
 
 I've used this pipeline with NextFlow v. 19.04.1

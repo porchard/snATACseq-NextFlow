@@ -341,7 +341,8 @@ process filter_nuclei_with_low_read_counts {
 
 
 process mark_duplicates {
-    
+
+    publishDir "${params.results}/mark_duplicates", mode: 'rellink', overwrite: true
     errorStrategy 'retry'
     maxRetries 1
     time '24h'
@@ -351,27 +352,11 @@ process mark_duplicates {
     set val(library), val(genome), file("${library}-${genome}.bam") from markduplicates_in
 
     output:
-    set val(library), val(genome), file("${library}-${genome}.md.noRG.bam") into markduplicates_out
-
-    """
-    java -Xmx40g -Xms40g -jar \$PICARD_JAR MarkDuplicates TMP_DIR=. I=${library}-${genome}.bam O=${library}-${genome}.md.noRG.bam READ_ONE_BARCODE_TAG=CB READ_TWO_BARCODE_TAG=CB ASSUME_SORTED=true MAX_RECORDS_IN_RAM=100000000 METRICS_FILE=${library}-${genome}.metrics VALIDATION_STRINGENCY=LENIENT
-    """
-
-}
-
-process add_readgroups {
-
-    publishDir "${params.results}/mark_duplicates", mode: 'rellink', overwrite: true
-    
-    input:
-    set val(library), val(genome), file(bam) from markduplicates_out
-
-    output:
     set val(library), val(genome), file("${library}-${genome}.md.bam"), file("${library}-${genome}.md.bam.bai") into prune_in
     set val(library), val(genome), file("${library}-${genome}.md.bam"), file("${library}-${genome}.md.bam.bai") into ataqv_in
 
     """
-    add-readgroups.py $bam ${library}-${genome}.md.bam
+    java -Xmx40g -Xms40g -jar \$PICARD_JAR MarkDuplicates TMP_DIR=. I=${library}-${genome}.bam O=${library}-${genome}.md.bam READ_ONE_BARCODE_TAG=CB READ_TWO_BARCODE_TAG=CB ASSUME_SORTED=true MAX_RECORDS_IN_RAM=100000000 METRICS_FILE=${library}-${genome}.metrics VALIDATION_STRINGENCY=LENIENT
     samtools index ${library}-${genome}.md.bam
     """
 
@@ -380,12 +365,11 @@ process add_readgroups {
 
 process prune {
 
+    publishDir "${params.results}/prune", mode: 'rellink', overwrite: true
     memory '3 GB'
     time '5h'
     errorStrategy 'retry'
     maxRetries 2
-
-    publishDir "${params.results}/prune", mode: 'rellink', overwrite: true
 
     input:
     set val(library), val(genome), file(md_bam), file(bam_index) from prune_in
@@ -394,7 +378,7 @@ process prune {
     set val(library), val(genome), file("${library}-${genome}.pruned.bam")
 
     """
-    ${IONICE} samtools view -h -b -f 3 -F 4 -F 8 -F 256 -F 1024 -F 2048 -q 30 $md_bam ${AUTOSOMAL_REFERENCES[genome].join(' ')} > ${library}-${genome}.unsorted.bam 
+    ${IONICE} samtools view -h -b -f 3 -F 4 -F 8 -F 256 -F 1024 -F 2048 -q 30 $md_bam ${AUTOSOMAL_REFERENCES[genome].join(' ')} > ${library}-${genome}.unsorted.bam
     samtools sort -m 2G -o ${library}-${genome}.pruned.bam -T bam-sort -O BAM ${library}-${genome}.unsorted.bam
     """
 
@@ -402,21 +386,21 @@ process prune {
 
 
 process ataqv {
-    
+
     publishDir "${params.results}/ataqv", mode: 'rellink', overwrite: true
     errorStrategy 'retry'
     maxRetries 1
-    memory { 25.GB * task.attempt }
+    memory { 50.GB * task.attempt }
     time '10h'
-    
+
     input:
     set val(library), val(genome), file(md_bam), file(bam_index) from ataqv_in
-    
+
     output:
     set file("${library}-${genome}.ataqv.json.gz"), file("${library}-${genome}.ataqv.out")
 
     """
-    ${IONICE} ataqv --name ${library}-${genome} --metrics-file ${library}-${genome}.ataqv.json.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}.ataqv.out
-    """    
+    ${IONICE} ataqv --name ${library}-${genome} --ignore-read-groups --nucleus-barcode-tag CB --metrics-file ${library}-${genome}.ataqv.json.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}.ataqv.out
+    """
 
 }
