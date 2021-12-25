@@ -194,14 +194,13 @@ process fastqc_post_trim {
 
 process bwa {
 
+    publishDir "${params.results}/bwa", mode: 'rellink', overwrite: true
     memory '50 GB'
     cpus 12
     errorStrategy 'retry'
     maxRetries 1
     time '48h'
     tag "${library}-${readgroup}-${genome}"
-
-    publishDir "${params.results}/bwa", mode: 'rellink', overwrite: true
 
     input:
     tuple val(library), val(genome), val(readgroup), path(fastq_1), path(fastq_2)
@@ -240,6 +239,7 @@ process merge_readgroups {
 
     time '24h'
     publishDir "${params.results}/merge", mode: 'rellink', overwrite: true
+    tag "${library} ${genome}"
 
     input:
     tuple val(library), val(genome), path(bams)
@@ -254,26 +254,6 @@ process merge_readgroups {
 }
 
 
-process filter_nuclei_with_low_read_counts {
-
-    cpus 10
-    memory '25 GB'
-
-    input:
-    tuple val(library), val(genome), path(bam)
-
-    output:
-    tuple val(library), val(genome), path("${library}-${genome}.filtered.bam")
-
-    """
-    samtools view $bam | perl -pe 's/.*(CB:Z:.*?)\\s+.*/\$1\\n/' | grep CB | perl -pe 's/.*://' | sort --parallel=10 -S 20G | uniq -c > counts.txt
-    cat counts.txt | awk '\$1>=${params.low_read_count_threshold}' | perl -pe 's/^\\s+\\d+\\s//' > cb-keep.txt
-    samtools view -h -b -D CB:cb-keep.txt $bam > ${library}-${genome}.filtered.bam
-    """
-
-}
-
-
 process mark_duplicates {
 
     publishDir "${params.results}/mark_duplicates", mode: 'rellink', overwrite: true
@@ -281,6 +261,7 @@ process mark_duplicates {
     maxRetries 1
     time '24h'
     memory '50 GB'
+    tag "${library} ${genome}"
 
     input:
     tuple val(library), val(genome), path("${library}-${genome}.bam")
@@ -289,7 +270,8 @@ process mark_duplicates {
     tuple val(library), val(genome), path("${library}-${genome}.md.bam"), path("${library}-${genome}.md.bam.bai")
 
     """
-    java -Xmx40g -Xms40g -jar \$PICARD_JAR MarkDuplicates TMP_DIR=. I=${library}-${genome}.bam O=${library}-${genome}.md.bam READ_ONE_BARCODE_TAG=CB READ_TWO_BARCODE_TAG=CB ASSUME_SORTED=true MAX_RECORDS_IN_RAM=100000000 METRICS_FILE=${library}-${genome}.metrics VALIDATION_STRINGENCY=LENIENT && samtools index ${library}-${genome}.md.bam
+    java -Xmx40g -Xms40g -jar \$PICARD_JAR MarkDuplicates TMP_DIR=. I=${library}-${genome}.bam O=${library}-${genome}.md.bam READ_ONE_BARCODE_TAG=CB READ_TWO_BARCODE_TAG=CB ASSUME_SORTED=true MAX_RECORDS_IN_RAM=10000000 METRICS_FILE=${library}-${genome}.metrics VALIDATION_STRINGENCY=LENIENT
+    samtools index ${library}-${genome}.md.bam
     """
 
 }
@@ -302,6 +284,7 @@ process prune {
     time '5h'
     errorStrategy 'retry'
     maxRetries 2
+    tag "${library} ${genome}"
 
     input:
     tuple val(library), val(genome), path(md_bam), path(bam_index)
@@ -316,25 +299,84 @@ process prune {
 }
 
 
-process ataqv {
 
-    publishDir "${params.results}/ataqv", mode: 'rellink', overwrite: true
-    errorStrategy 'retry'
-    maxRetries 1
-    memory { 50.GB * task.attempt }
+
+process chunk_single_nucleus_bams {
+
     time '10h'
+    tag "${library} ${genome}"
 
     input:
     tuple val(library), val(genome), path(md_bam), path(bam_index)
 
     output:
-    tuple path("${library}-${genome}.ataqv.json.gz"), path("${library}-${genome}.ataqv.out")
+    tuple val(library), val(genome), path("${library}-${genome}.chunk*.bam")
 
     """
-    ${IONICE} ataqv --name ${library}-${genome} --ignore-read-groups --nucleus-barcode-tag CB --metrics-file ${library}-${genome}.ataqv.json.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}.ataqv.out
+    ${IONICE} chunk-bam-by-barcode.py $md_bam ${library}-${genome}.
     """
 
 }
+
+process ataqv_single_nucleus {
+
+    publishDir "${params.results}/ataqv/single-nucleus/json", mode: 'rellink', overwrite: true
+    errorStrategy 'retry'
+    maxRetries 1
+    memory { 50.GB * task.attempt }
+    time '10h'
+    tag "${library} ${genome}"
+
+    input:
+    tuple val(library), val(genome), val(chunk), path(md_bam)
+
+    output:
+    tuple val(library), val(genome), path("${library}-${genome}.chunk_${chunk}.ataqv.json.gz"), emit: json
+    path("${library}-${genome}.chunk_${chunk}.ataqv.out")
+
+    """
+    ${IONICE} samtools index $md_bam && ataqv --name ${library}-${genome} --ignore-read-groups --nucleus-barcode-tag CB --metrics-file ${library}-${genome}.chunk_${chunk}.ataqv.json.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}.chunk_${chunk}.ataqv.out
+    """
+
+}
+
+process reformat_ataqv {
+
+    memory { 100.GB * task.attempt }
+    time '10h'
+    tag "${library} ${genome}"
+
+    input:
+    tuple val(library), val(genome), path(json)
+
+    output:
+    tuple val(library), val(genome), path("${library}-${genome}.txt")
+
+    """
+    extractAtaqvMetric.py --files $json > ${library}-${genome}.txt
+    """
+
+}
+
+
+process concat_ataqv {
+
+    publishDir "${params.results}/ataqv/single-nucleus", mode: 'rellink', overwrite: true
+    time '10h'
+    tag "${library} ${genome}"
+
+    input:
+    tuple val(library), val(genome), path("ataqv.*.txt")
+
+    output:
+    tuple val(library), val(genome), path("${library}-${genome}.txt")
+
+    """
+    cat ataqv.*.txt | cut -f2-4 > ${library}-${genome}.txt
+    """
+
+}
+
 
 workflow {
 
@@ -370,15 +412,15 @@ workflow {
     fastqc(Channel.from(fastqc_in))
 
     // handle the chunking
-    chunked_out = chunk_fastq(Channel.from(chunk_fastq_in)).transpose().map({it -> [it[0], it[1] + "___" + it[3].getName().tokenize('.')[-2], it[2], it[3]]}) // library, {readgroup}___{chunk}, read, file
+    chunked_out = chunk_fastq(Channel.from(chunk_fastq_in)).transpose().map({it -> [it[0], it[1] + "___" + it[3].getName().tokenize('.')[-2], it[2], it[3]]})
     fastq_in = chunked_out.mix(Channel.from(no_chunk_fastq_in))
-    first_insert = fastq_in.filter({it -> it[2] == '1'}).map({it -> [it[0], it[1], it[3]]}) // library, readgroup, file
-    second_insert = fastq_in.filter({it -> it[2] == '2'}).map({it -> [it[0], it[1], it[3]]}) // library, readgroup, file
-    barcodes = fastq_in.filter({it -> it[2] == 'barcode'}).map({it -> [it[0], it[1], it[3]]}) // library, readgroup, file
+    first_insert = fastq_in.filter({it -> it[2] == '1'}).map({it -> [it[0], it[1], it[3]]})
+    second_insert = fastq_in.filter({it -> it[2] == '2'}).map({it -> [it[0], it[1], it[3]]})
+    barcodes = fastq_in.filter({it -> it[2] == 'barcode'}).map({it -> [it[0], it[1], it[3]]})
     
-    transformed_barcodes = transform_barcode(barcodes) //  library, readgroup, file
+    transformed_barcodes = transform_barcode(barcodes)
     corrected_barcodes = transformed_barcodes.map({it -> [it[0], it[2]]}).groupTuple(sort: true) | make_barcode_corrections
-    trimmed = first_insert.combine(second_insert, by: [0, 1]).combine(transformed_barcodes, by: [0, 1]) | trim // library, readgroup, fastq1, fastq2
+    trimmed = first_insert.combine(second_insert, by: [0, 1]).combine(transformed_barcodes, by: [0, 1]) | trim
     
     // fastqc on trimmed barcodes
     trimmed.map({it -> [it[0], it[1], ['1', '2'], [it[2], it[3]]]}).transpose() | fastqc_post_trim
@@ -391,11 +433,11 @@ workflow {
         }
     }
 
-    mapped = Channel.from(tmp).combine(trimmed, by: 0) | bwa // tuple val(library), val(readgroup), val(genome), path("${library}-${readgroup}-${genome}.bam")
+    mapped = Channel.from(tmp).combine(trimmed, by: 0) | bwa
 
-    // 
-    bam_barcodes_corrected = mapped.combine(corrected_barcodes, by: 0) | correct_barcodes_in_bam // tuple val(library), val(genome), path("${library}-${readgroup}-${genome}.corrected.bam")
-    md_bams = bam_barcodes_corrected.groupTuple(by: [0, 1], sort: true) | merge_readgroups | filter_nuclei_with_low_read_counts | mark_duplicates // val(library), val(genome), path(bam), path(index)
+    // processed mapped
+    bam_barcodes_corrected = mapped.combine(corrected_barcodes, by: 0) | correct_barcodes_in_bam
+    md_bams = bam_barcodes_corrected.groupTuple(by: [0, 1], sort: true) | merge_readgroups | mark_duplicates
     prune(md_bams)
-    ataqv(md_bams)
+    sn_ataqv = (((md_bams | chunk_single_nucleus_bams).transpose().map({it -> [it[0], it[1], it[2].getName().tokenize('.')[-2].replaceAll('chunk', ''), it[2]]}) | ataqv_single_nucleus).json | reformat_ataqv).groupTuple(by: [0, 1]) | concat_ataqv
 }

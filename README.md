@@ -28,8 +28,6 @@ You'll also need to set the params.results variable -- either in the nextflow.co
 
 You can split the fastq files into chunks using the --chunks parameter (default: 1, meaning no chunking). In the case of very large fastq files this can speed up processing.
 
-To reduce memory usage of ataqv, we filter out nuclei with low read counts before running ataqv. The minimum read threshold is set in the nextflow.config file.
-
 Lastly, you'll need to include information about each ATAC-seq library, including the genome(s) for the species that each library includes, and the paths to the fastq files for each readgroup. Organize this information in a JSON file, as in library-config.json. Note that for each readgroup, three fastq files are required -- the first and second insert reads ('1' and '2'), and the read with the nuclear barcode ('index')
 
 ## Running
