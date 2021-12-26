@@ -378,6 +378,23 @@ process concat_ataqv {
 }
 
 
+process plot_qc_metrics {
+
+    publishDir "${params.results}/ataqv/single-nucleus", mode: 'rellink', overwrite: true
+    time '10h'
+    tag "${library} ${genome}"
+
+    input:
+    tuple val(library), val(genome), path(metrics)
+
+    output:
+    tuple val(library), val(genome), path("*.png")
+
+    """
+    plot-qc-metrics.py --prefix ${library}-${genome}. $metrics
+    """
+
+}
 workflow {
 
     libraries = params.libraries.keySet()
@@ -439,5 +456,5 @@ workflow {
     bam_barcodes_corrected = mapped.combine(corrected_barcodes, by: 0) | correct_barcodes_in_bam
     md_bams = bam_barcodes_corrected.groupTuple(by: [0, 1], sort: true) | merge_readgroups | mark_duplicates
     prune(md_bams)
-    sn_ataqv = (((md_bams | chunk_single_nucleus_bams).transpose().map({it -> [it[0], it[1], it[2].getName().tokenize('.')[-2].replaceAll('chunk', ''), it[2]]}) | ataqv_single_nucleus).json | reformat_ataqv).groupTuple(by: [0, 1]) | concat_ataqv
+    sn_ataqv = (((md_bams | chunk_single_nucleus_bams).transpose().map({it -> [it[0], it[1], it[2].getName().tokenize('.')[-2].replaceAll('chunk', ''), it[2]]}) | ataqv_single_nucleus).json | reformat_ataqv).groupTuple(by: [0, 1]) | concat_ataqv | plot_qc_metrics
 }
