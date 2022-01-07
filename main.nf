@@ -7,23 +7,49 @@ IONICE = 'ionice -c2 -n7'
 
 // Generic data
 AUTOSOMAL_REFERENCES = ['hg19': (1..22).collect({it -> 'chr' + it}),
-            'hg38': (1..22).collect({it -> 'chr' + it}),
-            'rn5': (1..20).collect({it -> 'chr' + it}),
-            'rn6': (1..20).collect({it -> 'chr' + it}),
-            'mm9': (1..19).collect({it -> 'chr' + it}),
-            'mm10': (1..19).collect({it -> 'chr' + it})
+    'hg38': (1..22).collect({it -> 'chr' + it}),
+    'rn4': (1..20).collect({it -> 'chr' + it}),
+    'rn5': (1..20).collect({it -> 'chr' + it}),
+    'rn6': (1..20).collect({it -> 'chr' + it}),
+    'rn7': (1..20).collect({it -> 'chr' + it}),
+    'mm9': (1..19).collect({it -> 'chr' + it}),
+    'mm10': (1..19).collect({it -> 'chr' + it})
 ]
 
 ORGANISMS = ['hg19': 'human', 
-        'hg38': 'human',
-        'rn5': 'rat',
-        'rn6': 'rat',
-        'mm9': 'mouse',
-        'mm10': 'mouse']
+    'hg38': 'human',
+    'rn4': 'rat',
+    'rn5': 'rat',
+    'rn6': 'rat',
+    'rn7': 'mm',
+    'mm9': 'mouse',
+    'mm10': 'mouse'
+]
+
+MACS2_GENOME_SIZE = [
+    'rn4': 'mm',
+    'rn5': 'mm',
+    'rn6': 'mm',
+    'rn7': 'mm',
+    'mm9': 'mm',
+    'mm10': 'mm',
+    'hg19': 'hs',
+    'hg38': 'hs'
+]
 
 
 def make_excluded_regions_arg (genome) {
     return params.blacklist[genome].collect({'--excluded-region-file ' + it}).join(' ')
+}
+
+
+def has_blacklist (genome) {
+        params.blacklist.containsKey(genome)
+}
+
+
+def get_blacklists (genome) {
+        params.blacklist[genome]
 }
 
 
@@ -54,6 +80,11 @@ def get_organism (genome) {
 
 def get_chrom_sizes (genome) {
     params.chrom_sizes[genome]
+}
+
+
+def get_macs2_genome_size (genome) {
+    MACS2_GENOME_SIZE[genome]
 }
 
 
@@ -299,7 +330,106 @@ process prune {
 }
 
 
+process bamtobed {
 
+    time '4h'
+    maxForks 10
+    tag "${library} ${genome}"
+
+    input:
+    tuple val(library), val(genome), path(bam)
+
+    output:
+    tuple val(library), val(genome), path("${library}-${genome}.bed")
+
+    """
+    bedtools bamtobed -i $bam > ${library}-${genome}.bed
+    """
+
+}
+
+
+process macs2 {
+
+    publishDir "${params.results}/macs2", mode: 'rellink'
+    time '5h'
+    tag "${library} ${genome}"
+
+    input:
+    tuple val(library), val(genome), path(bed)
+
+    output:
+    tuple val(library), val(genome), path("${library}-${genome}_peaks.broadPeak"), emit: peaks
+    tuple val(library), val(genome), path("${library}-${genome}_treat_pileup.bdg"), emit: bedgraph
+
+    """
+    macs2 callpeak -t $bed --outdir . --SPMR -f BED -n ${library}-${genome} -g ${get_macs2_genome_size(genome)} --nomodel --shift -100 --seed 762873 --extsize 200 -B --broad --keep-dup all
+    """
+
+}
+
+process blacklist_filter_peaks {
+
+    publishDir "${params.results}/macs2", mode: 'rellink'
+    time '1h'
+    tag "${library} ${genome}"
+
+    input:
+    tuple val(library), val(genome), path(peaks)
+
+    output:
+    path("${library}-${genome}_peaks.broadPeak.noblacklist")
+
+    when:
+    has_blacklist(genome)
+
+    """
+    bedtools intersect -a $peaks -b ${get_blacklists(genome).join(' ')} -v > ${library}-${genome}_peaks.broadPeak.noblacklist
+    """
+
+}
+
+
+process bigwig {
+
+    time '5h'
+    publishDir "${params.results}/bigwig", mode: 'rellink'
+    tag "${library} ${genome}"
+
+    input:
+    tuple val(library), val(genome), path(bedgraph)
+
+    output:
+    tuple val(genome), path("${library}-${genome}.bw")
+
+    """
+    LC_COLLATE=C sort -k1,1 -k2n,2 $bedgraph > sorted.bedgraph
+    bedClip sorted.bedgraph ${get_chrom_sizes(genome)} clipped.bedgraph
+    bedGraphToBigWig clipped.bedgraph ${get_chrom_sizes(genome)} ${library}-${genome}.bw
+    rm sorted.bedgraph clipped.bedgraph
+    """
+
+}
+
+process plot_signal_at_tss {
+
+    publishDir "${params.results}/bigwig/plot", mode: 'rellink', overwrite: true
+    errorStrategy 'retry'
+    maxRetries 1
+    memory { 5.GB * task.attempt }
+    tag "${genome}"
+
+    input:
+    tuple val(genome), path(bw)
+
+    output:
+    path("*.png") optional true
+
+    """
+    plot-signal-at-tss.py --genes ${params.plot_signal_at_genes.join(' ')} --tss-file ${get_tss(genome)} --bigwigs ${bw.join(' ')}
+    """
+
+}
 
 process chunk_single_nucleus_bams {
 
@@ -395,6 +525,53 @@ process plot_qc_metrics {
     """
 
 }
+
+
+process ataqv_bulk {
+
+    publishDir "${params.results}/ataqv/bulk", mode: 'rellink', overwrite: true
+    errorStrategy 'retry'
+    maxRetries 1
+    memory { 5.GB * task.attempt }
+    time '10h'
+    tag "${library} ${genome}"
+
+    input:
+    tuple val(library), val(genome), path(md_bam), path(bam_index), path(peaks)
+
+    output:
+    tuple val(genome), path("${library}-${genome}.ataqv.json.gz"), emit: json
+    path("${library}-${genome}.ataqv.out")
+
+    """
+    ${IONICE} ataqv --name ${library}-${genome} --peak-file $peaks --ignore-read-groups --metrics-file ${library}-${genome}.ataqv.json.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}.ataqv.out
+    """
+
+}
+
+
+process ataqv_bulk_viewer {
+
+    publishDir "${params.results}/ataqv/bulk", mode: 'rellink', overwrite: true
+    errorStrategy 'retry'
+    maxRetries 1
+    memory { 10.GB * task.attempt }
+    time '1h'
+    tag "${genome}"
+
+    input:
+    tuple val(genome), path(json)
+
+    output:
+    path("ataqv-viewer-${genome}")
+
+    """
+    mkarv ataqv-viewer-${genome} ${json.join(' ')}
+    """
+
+}
+
+
 workflow {
 
     libraries = params.libraries.keySet()
@@ -455,6 +632,9 @@ workflow {
     // processed mapped
     bam_barcodes_corrected = mapped.combine(corrected_barcodes, by: 0) | correct_barcodes_in_bam
     md_bams = bam_barcodes_corrected.groupTuple(by: [0, 1], sort: true) | merge_readgroups | mark_duplicates
-    prune(md_bams)
+    peak_calling = prune(md_bams) | bamtobed | macs2
+    blacklist_filter_peaks(peak_calling.peaks)
+    bigwig(peak_calling.bedgraph).groupTuple() | plot_signal_at_tss
     sn_ataqv = (((md_bams | chunk_single_nucleus_bams).transpose().map({it -> [it[0], it[1], it[2].getName().tokenize('.')[-2].replaceAll('chunk', ''), it[2]]}) | ataqv_single_nucleus).json | reformat_ataqv).groupTuple(by: [0, 1]) | concat_ataqv | plot_qc_metrics
+    ataqv_bulk(md_bams.combine(peak_calling.peaks, by: [0, 1])).json.groupTuple() | ataqv_bulk_viewer
 }
