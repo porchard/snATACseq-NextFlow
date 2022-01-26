@@ -44,12 +44,12 @@ def make_excluded_regions_arg (genome) {
 
 
 def has_blacklist (genome) {
-        params.blacklist.containsKey(genome)
+    return params.blacklist.containsKey(genome)
 }
 
 
 def get_blacklists (genome) {
-        params.blacklist[genome]
+    return params.blacklist[genome]
 }
 
 
@@ -59,42 +59,42 @@ def is_chimeric (library) {
 
 
 def get_bwa_index (genome) {
-    params.bwa_index[genome]
+    return params.bwa_index[genome]
 }
 
 
 def get_genome (library) {
-    params.libraries[library].genome
+    return params.libraries[library].genome
 }
 
 
 def get_tss (genome) {
-    params.tss[genome]
+    return params.tss[genome]
 }
 
 
 def get_organism (genome) {
-    ORGANISMS[genome]
+    return ORGANISMS[genome]
 }
 
 
 def get_chrom_sizes (genome) {
-    params.chrom_sizes[genome]
+    return params.chrom_sizes[genome]
 }
 
 
 def get_macs2_genome_size (genome) {
-    MACS2_GENOME_SIZE[genome]
+    return MACS2_GENOME_SIZE[genome]
 }
 
 
 def library_to_readgroups (library) {
-    params.libraries[library].readgroups.keySet()
+    return params.libraries[library].readgroups.keySet()
 }
 
 
 def library_and_readgroup_to_fastqs (library, readgroup) {
-    params.libraries[library].readgroups[readgroup]
+    return params.libraries[library].readgroups[readgroup]
 }
 
 
@@ -102,6 +102,7 @@ process fastqc {
 
     publishDir "${params.results}/fastqc/before-trim", mode: 'rellink', overwrite: true
     time '24h'
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(readgroup), val(read), path(fastq)
@@ -119,11 +120,32 @@ process fastqc {
 
 }
 
-//{args.prefix}chunk_{chunk}.fastq --> ${library}___${readgroup}.${read}.chunk_${chunk}.fastq
+
+process multiqc {
+
+    publishDir "${params.results}/multiqc/before-trim", mode: 'rellink', overwrite: true
+    time '24h'
+    container 'library://porchard/default/general:20220107'
+
+    input:
+    path(x)
+
+    output:
+    path('multiqc_data')
+    path('multiqc_report.html')
+
+    """
+    multiqc .
+    """
+
+}
+
+
 process chunk_fastq {
 
     maxForks 10
     time '24h'
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(readgroup), val(read), path(fastq)
@@ -146,6 +168,7 @@ process transform_barcode {
     publishDir "${params.results}/transformed-barcodes", mode: 'rellink'
     tag "${library}-${readgroup}"
     memory '10 GB'
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(readgroup), path(fastq)
@@ -166,6 +189,7 @@ process make_barcode_corrections {
     tag "${library}"
     cpus 3
     memory '10 GB'
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), path(barcode_fastq)
@@ -187,6 +211,7 @@ process trim {
     maxRetries 1
     time '24h'
     tag "${library}-${readgroup}"
+    container 'library://porchard/default/cta:20220113'
 
     input:
     tuple val(library), val(readgroup), path(fastq_1), path(fastq_2), path(barcode)
@@ -205,6 +230,7 @@ process fastqc_post_trim {
 
     publishDir "${params.results}/fastqc/after-trim", mode: 'rellink', overwrite: true
     time '24h'
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(readgroup), val(read), path(fastq)
@@ -223,15 +249,35 @@ process fastqc_post_trim {
 }
 
 
+process multiqc_post_trim {
+
+    publishDir "${params.results}/multiqc/after-trim", mode: 'rellink', overwrite: true
+    time '24h'
+    container 'library://porchard/default/general:20220107'
+
+    input:
+    path(x)
+
+    output:
+    path('multiqc_data')
+    path('multiqc_report.html')
+
+    """
+    multiqc .
+    """
+
+}
+
+
 process bwa {
 
-    publishDir "${params.results}/bwa", mode: 'rellink', overwrite: true
     memory '50 GB'
     cpus 12
     errorStrategy 'retry'
     maxRetries 1
     time '48h'
     tag "${library}-${readgroup}-${genome}"
+    container 'library://porchard/default/bwa:0.7.15'
 
     input:
     tuple val(library), val(genome), val(readgroup), path(fastq_1), path(fastq_2)
@@ -252,6 +298,7 @@ process correct_barcodes_in_bam {
     publishDir "${params.results}/bwa-corrected-barcodes", mode: 'rellink', overwrite: true
     memory '75 GB'
     time '24h'
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(readgroup), val(genome), path(bam), path(corrections)
@@ -271,6 +318,7 @@ process merge_readgroups {
     time '24h'
     publishDir "${params.results}/merge", mode: 'rellink', overwrite: true
     tag "${library} ${genome}"
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(genome), path(bams)
@@ -293,6 +341,7 @@ process mark_duplicates {
     time '24h'
     memory '50 GB'
     tag "${library} ${genome}"
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(genome), path("${library}-${genome}.bam")
@@ -316,6 +365,7 @@ process prune {
     errorStrategy 'retry'
     maxRetries 2
     tag "${library} ${genome}"
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(genome), path(md_bam), path(bam_index)
@@ -335,6 +385,7 @@ process bamtobed {
     time '4h'
     maxForks 10
     tag "${library} ${genome}"
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(genome), path(bam)
@@ -354,6 +405,7 @@ process macs2 {
     publishDir "${params.results}/macs2", mode: 'rellink'
     time '5h'
     tag "${library} ${genome}"
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(genome), path(bed)
@@ -373,6 +425,7 @@ process blacklist_filter_peaks {
     publishDir "${params.results}/macs2", mode: 'rellink'
     time '1h'
     tag "${library} ${genome}"
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(genome), path(peaks)
@@ -395,6 +448,7 @@ process bigwig {
     time '5h'
     publishDir "${params.results}/bigwig", mode: 'rellink'
     tag "${library} ${genome}"
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(genome), path(bedgraph)
@@ -411,6 +465,7 @@ process bigwig {
 
 }
 
+
 process plot_signal_at_tss {
 
     publishDir "${params.results}/bigwig/plot", mode: 'rellink', overwrite: true
@@ -418,6 +473,7 @@ process plot_signal_at_tss {
     maxRetries 1
     memory { 5.GB * task.attempt }
     tag "${genome}"
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(genome), path(bw)
@@ -431,10 +487,12 @@ process plot_signal_at_tss {
 
 }
 
+
 process chunk_single_nucleus_bams {
 
     time '10h'
     tag "${library} ${genome}"
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(genome), path(md_bam), path(bam_index)
@@ -448,6 +506,26 @@ process chunk_single_nucleus_bams {
 
 }
 
+
+process index_chunked_single_nucleus_bams {
+
+    time '4h'
+    tag "${library} ${genome} chunk_${chunk}"
+    container 'library://porchard/default/general:20220107'
+
+    input:
+    tuple val(library), val(genome), val(chunk), path(bam)
+
+    output:
+    tuple val(library), val(genome), val(chunk), path(bam), path("${bam.getName() + '.bai'}")
+
+    """
+    samtools index $bam
+    """
+
+}
+
+
 process ataqv_single_nucleus {
 
     publishDir "${params.results}/ataqv/single-nucleus/json", mode: 'rellink', overwrite: true
@@ -456,16 +534,17 @@ process ataqv_single_nucleus {
     memory { 50.GB * task.attempt }
     time '10h'
     tag "${library} ${genome}"
+    container 'library://porchard/default/ataqv:1.3.0'
 
     input:
-    tuple val(library), val(genome), val(chunk), path(md_bam)
+    tuple val(library), val(genome), val(chunk), path(md_bam), path(bam_index)
 
     output:
     tuple val(library), val(genome), path("${library}-${genome}.chunk_${chunk}.ataqv.json.gz"), emit: json
     path("${library}-${genome}.chunk_${chunk}.ataqv.out")
 
     """
-    ${IONICE} samtools index $md_bam && ataqv --name ${library}-${genome} --ignore-read-groups --nucleus-barcode-tag CB --metrics-file ${library}-${genome}.chunk_${chunk}.ataqv.json.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}.chunk_${chunk}.ataqv.out
+    ataqv --name ${library}-${genome} --ignore-read-groups --nucleus-barcode-tag CB --metrics-file ${library}-${genome}.chunk_${chunk}.ataqv.json.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}.chunk_${chunk}.ataqv.out
     """
 
 }
@@ -475,6 +554,7 @@ process reformat_ataqv {
     memory { 100.GB * task.attempt }
     time '10h'
     tag "${library} ${genome}"
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(genome), path(json)
@@ -494,6 +574,7 @@ process concat_ataqv {
     publishDir "${params.results}/ataqv/single-nucleus", mode: 'rellink', overwrite: true
     time '10h'
     tag "${library} ${genome}"
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(genome), path("ataqv.*.txt")
@@ -513,6 +594,7 @@ process plot_qc_metrics {
     publishDir "${params.results}/ataqv/single-nucleus", mode: 'rellink', overwrite: true
     time '10h'
     tag "${library} ${genome}"
+    container 'library://porchard/default/general:20220107'
 
     input:
     tuple val(library), val(genome), path(metrics)
@@ -535,6 +617,7 @@ process ataqv_bulk {
     memory { 5.GB * task.attempt }
     time '10h'
     tag "${library} ${genome}"
+    container 'library://porchard/default/ataqv:1.3.0'
 
     input:
     tuple val(library), val(genome), path(md_bam), path(bam_index), path(peaks)
@@ -558,6 +641,7 @@ process ataqv_bulk_viewer {
     memory { 10.GB * task.attempt }
     time '1h'
     tag "${genome}"
+    container 'library://porchard/default/ataqv:1.3.0'
 
     input:
     tuple val(genome), path(json)
@@ -603,7 +687,7 @@ workflow {
         }
     }
 
-    fastqc(Channel.from(fastqc_in))
+    fastqc(Channel.from(fastqc_in)).flatten().toSortedList() | multiqc
 
     // handle the chunking
     chunked_out = chunk_fastq(Channel.from(chunk_fastq_in)).transpose().map({it -> [it[0], it[1] + "___" + it[3].getName().tokenize('.')[-2], it[2], it[3]]})
@@ -617,7 +701,7 @@ workflow {
     trimmed = first_insert.combine(second_insert, by: [0, 1]).combine(transformed_barcodes, by: [0, 1]) | trim
     
     // fastqc on trimmed barcodes
-    trimmed.map({it -> [it[0], it[1], ['1', '2'], [it[2], it[3]]]}).transpose() | fastqc_post_trim
+    (trimmed.map({it -> [it[0], it[1], ['1', '2'], [it[2], it[3]]]}).transpose() | fastqc_post_trim).flatten().toSortedList() | multiqc_post_trim
 
     // map
     tmp = []
@@ -635,6 +719,7 @@ workflow {
     peak_calling = prune(md_bams) | bamtobed | macs2
     blacklist_filter_peaks(peak_calling.peaks)
     bigwig(peak_calling.bedgraph).groupTuple() | plot_signal_at_tss
-    sn_ataqv = (((md_bams | chunk_single_nucleus_bams).transpose().map({it -> [it[0], it[1], it[2].getName().tokenize('.')[-2].replaceAll('chunk', ''), it[2]]}) | ataqv_single_nucleus).json | reformat_ataqv).groupTuple(by: [0, 1]) | concat_ataqv | plot_qc_metrics
+    sn_ataqv = (((md_bams | chunk_single_nucleus_bams).transpose().map({it -> [it[0], it[1], it[2].getName().tokenize('.')[-2].replaceAll('chunk', ''), it[2]]}) | index_chunked_single_nucleus_bams | ataqv_single_nucleus).json | reformat_ataqv).groupTuple(by: [0, 1]) | concat_ataqv | plot_qc_metrics
     ataqv_bulk(md_bams.combine(peak_calling.peaks, by: [0, 1])).json.groupTuple() | ataqv_bulk_viewer
+
 }

@@ -1,26 +1,15 @@
 # NextFlow pipeline for 10X snATAC-seq data
 
 ## Dependencies
-If you have Singularity installed, you can use the config provided here ('Singularity') to build a container with all the dependencies.
+Singularity (v. 3) and NextFlow (>= v. 20.10.0). Containers with the software for each step are pulled from the Sylabs cloud library (https://cloud.sylabs.io/library).
 
-Otherwise, you'll need to have the following installed:
-1. biopython
-2. bwa
-3. picardtools
-4. fastqc
-5. samtools (v. 1.10 or above)
-6. pysam
-7. ataqv (v. 1.3.0 or above)
-8. cta (the forked version on the porchard GitHub)
-
-I've used this pipeline with NextFlow v. 20.10.0
 
 ## Configuration
 Paths to various generic files (e.g., bwa indices) must be included in the nextflow.config file -- check that file and change paths accordingly. These include:
 
 1. Blacklist bed files for each genome
 2. Chrom size files for each genome
-3. BWA indices
+3. bwa indices (compatible with bwa v. 0.7.15)
 4. TSS files (BED6 files denoting TSS positions)
 5. Path to the barcode whitelist (the 10X whitelist is included in this repo)
 
