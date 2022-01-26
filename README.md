@@ -25,5 +25,5 @@ Lastly, you'll need to include information about each ATAC-seq library, includin
 Once you have all of the above information, you can run the pipeline as follows (in this case, indicating the path to the results on the command line):
 
 ```bash
-nextflow run -with-singularity /path/to/Singularity.simg -params-file library-config.json --results /path/to/results /path/to/main.nf
+nextflow run -params-file library-config.json --results /path/to/results /path/to/main.nf
 ```
