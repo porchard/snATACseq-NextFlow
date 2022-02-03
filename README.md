@@ -11,7 +11,7 @@ Paths to various generic files (e.g., bwa indices) must be included in the nextf
 2. Chrom size files for each genome
 3. bwa indices (compatible with bwa v. 0.7.15)
 4. TSS files (BED6 files denoting TSS positions)
-5. Path to the barcode whitelist (the 10X whitelist is included in this repo)
+5. Path to the barcode whitelist. The 10X ATAC v1 (737K-cratac-v1.txt) and 10X ATAC multiome (737K-arc-v1.txt) whitelists are included in this repo.
 
 You'll also need to set the params.results variable -- either in the nextflow.config file itself, or on the command line when you run the pipeline ('--results /path/to/results').
 
