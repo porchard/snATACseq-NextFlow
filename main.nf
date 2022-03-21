@@ -296,7 +296,9 @@ process correct_barcodes_in_bam {
 
     tag "${library}-${readgroup}-${genome}"
     publishDir "${params.results}/bwa-corrected-barcodes", mode: 'rellink', overwrite: true
-    memory '75 GB'
+    memory { 30.GB * task.attempt }
+    maxRetries 3
+    errorStrategy 'retry'
     time '24h'
     container 'library://porchard/default/general:20220107'
 
@@ -361,7 +363,7 @@ process prune {
 
     publishDir "${params.results}/prune", mode: 'rellink', overwrite: true
     memory '3 GB'
-    time '5h'
+    time '24h'
     errorStrategy 'retry'
     maxRetries 2
     tag "${library} ${genome}"
@@ -403,8 +405,11 @@ process bamtobed {
 process macs2 {
 
     publishDir "${params.results}/macs2", mode: 'rellink'
-    time '5h'
+    time '24h'
     tag "${library} ${genome}"
+    memory { 25.GB * task.attempt }
+    maxRetries 2
+    errorStrategy 'retry'
     container 'library://porchard/default/general:20220107'
 
     input:
@@ -445,10 +450,13 @@ process blacklist_filter_peaks {
 
 process bigwig {
 
-    time '5h'
+    time '24h'
     publishDir "${params.results}/bigwig", mode: 'rellink'
     tag "${library} ${genome}"
     container 'library://porchard/default/general:20220107'
+    memory { 20.GB * task.attempt }
+    maxRetries 2
+    errorStrategy 'retry'
 
     input:
     tuple val(library), val(genome), path(bedgraph)
@@ -471,7 +479,7 @@ process plot_signal_at_tss {
     publishDir "${params.results}/bigwig/plot", mode: 'rellink', overwrite: true
     errorStrategy 'retry'
     maxRetries 1
-    memory { 5.GB * task.attempt }
+    memory { 10.GB * task.attempt }
     tag "${genome}"
     container 'library://porchard/default/general:20220107'
 
@@ -594,7 +602,10 @@ process plot_qc_metrics {
     publishDir "${params.results}/ataqv/single-nucleus", mode: 'rellink', overwrite: true
     time '10h'
     tag "${library} ${genome}"
-    container 'library://porchard/default/general:20220107'
+    container 'library://porchard/default/dropkick:20220225.sif'
+    memory { 10.GB * task.attempt }
+    maxRetries 1
+    errorStrategy 'retry'
 
     input:
     tuple val(library), val(genome), path(metrics)
