@@ -602,7 +602,7 @@ process plot_qc_metrics {
     publishDir "${params.results}/ataqv/single-nucleus", mode: 'rellink', overwrite: true
     time '10h'
     tag "${library} ${genome}"
-    container 'library://porchard/default/dropkick:20220225.sif'
+    container 'library://porchard/default/dropkick:20220225'
     memory { 10.GB * task.attempt }
     maxRetries 1
     errorStrategy 'retry'
