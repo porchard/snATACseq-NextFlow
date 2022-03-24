@@ -612,6 +612,7 @@ process plot_qc_metrics {
 
     output:
     tuple val(library), val(genome), path("*.png")
+    path("*.tsv")
 
     """
     plot-qc-metrics.py --prefix ${library}-${genome}. $metrics
