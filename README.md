@@ -27,3 +27,17 @@ Once you have all of the above information, you can run the pipeline as follows 
 ```bash
 nextflow run -params-file library-config.json --results /path/to/results /path/to/main.nf
 ```
+
+## Output
+* `ataqv/bulk/*.{json.gz,out}`: Pseudobulk ataqv output for each library
+* `ataqv/bulk/ataqv-viewer-{genome}`: Pseudobulk ataqv HTML reports
+* `ataqv/single-nucleus/json/*`: ataqv json files for each library, chunked into subsets of barcodes
+* `ataqv/single-nucleus/*.png`: Plots of per-barcode ataqv metrics
+* `ataqv/single-nucleus/*.txt`: Per barcode ataqv metrics in txt format
+* `ataqv/single-nucleus/*.suggested-thresholds.tsv`: Suggested min HQAA threshold for the library, based on multi-otsu thresholding of the HQAA distribution
+* `bigwig/*.bw`: Pseudobulk bigwig files for each library
+* `bigwig/plot/*.png`: Pseudobulk ATAC signal at gene TSS for selected genes
+* `macs2/*`: Pseudobulk peak calling results for each library
+* `multiqc/*`: multiqc summaries of fastqc results, before and after adapter trimming
+* `prune/*`: Filtered bam files
+
