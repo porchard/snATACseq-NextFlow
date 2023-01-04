@@ -38,18 +38,22 @@ MACS2_GENOME_SIZE = [
 ]
 
 
-def make_excluded_regions_arg (genome) {
-    return params.blacklist[genome].collect({'--excluded-region-file ' + it}).join(' ')
-}
-
-
 def has_blacklist (genome) {
     return params.blacklist.containsKey(genome)
 }
 
 
 def get_blacklists (genome) {
-    return params.blacklist[genome]
+    if (params.blacklist[genome] instanceof String) {
+        return [params.blacklist[genome]]
+    } else {
+        return params.blacklist[genome]
+    }
+}
+
+
+def make_excluded_regions_arg (genome) {
+    return get_blacklists(genome).collect({'--excluded-region-file ' + it}).join(' ')
 }
 
 
@@ -64,7 +68,7 @@ def get_bwa_index (genome) {
 
 
 def get_genome (library) {
-    return params.libraries[library].genome
+    return (params.libraries[library].genome instanceof List) ? params.libraries[library].genome : [params.libraries[library].genome]
 }
 
 
