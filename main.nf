@@ -21,7 +21,7 @@ ORGANISMS = ['hg19': 'human',
     'rn4': 'rat',
     'rn5': 'rat',
     'rn6': 'rat',
-    'rn7': 'mm',
+    'rn7': 'rat',
     'mm9': 'mouse',
     'mm10': 'mouse'
 ]
