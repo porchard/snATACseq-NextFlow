@@ -42,4 +42,5 @@ You may wish to run under nohup so that the pipeline continues to run in the bac
 * `macs2/*`: Pseudobulk peak calling results for each library
 * `multiqc/*`: multiqc summaries of fastqc results, before and after adapter trimming
 * `prune/*`: Filtered bam files
+* `plot-barcodes-matching-whitelist`: Plot displaying percentage of barcodes matching barcode whitelist
 

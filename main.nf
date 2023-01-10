@@ -187,6 +187,26 @@ process transform_barcode {
 }
 
 
+process plot_whitelist_matching {
+
+    publishDir "${params.results}/plot-barcodes-matching-whitelist", mode: 'rellink'
+    memory '10 GB'
+    container 'library://porchard/default/general:20220107'
+
+    input:
+    path(fastq)
+    path(whitelist)
+
+    output:
+    path("barcode-whitelist-matches.png")
+
+    """
+    plot-barcodes-matching-whitelist.py --whitelist $whitelist --fastq ${fastq.join(' ')}
+    """
+
+}
+
+
 process make_barcode_corrections {
 
     publishDir "${params.results}/corrected-barcodes", mode: 'rellink', overwrite: true
@@ -738,4 +758,6 @@ workflow {
     sn_ataqv = (((md_bams | chunk_single_nucleus_bams).transpose().map({it -> [it[0], it[1], it[2].getName().tokenize('.')[-2].replaceAll('chunk', ''), it[2]]}) | index_chunked_single_nucleus_bams | ataqv_single_nucleus).json | reformat_ataqv).groupTuple(by: [0, 1]) | concat_ataqv | plot_qc_metrics
     ataqv_bulk(md_bams.combine(peak_calling.peaks, by: [0, 1])).json.groupTuple() | ataqv_bulk_viewer
 
+    // plot fraction of barcodes matching whitelist (before )
+    plot_whitelist_matching(transformed_barcodes.map({it -> it[2]}).toSortedList(), Channel.fromPath(params['barcode-whitelist']))
 }
