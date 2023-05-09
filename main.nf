@@ -104,9 +104,11 @@ def library_and_readgroup_to_fastqs (library, readgroup) {
 
 process fastqc {
 
-    publishDir "${params.results}/fastqc/before-trim", mode: 'rellink', overwrite: true
-    time '24h'
+    publishDir "${params.results}/fastqc/before-trim"
     container 'library://porchard/default/general:20220107'
+    memory '4 GB'
+    cpus 1
+    time '5h'
 
     input:
     tuple val(library), val(readgroup), val(read), path(fastq)
@@ -127,9 +129,11 @@ process fastqc {
 
 process multiqc {
 
-    publishDir "${params.results}/multiqc/before-trim", mode: 'rellink', overwrite: true
-    time '24h'
+    publishDir "${params.results}/multiqc/before-trim"
     container 'library://porchard/default/general:20220107'
+    memory '4 GB'
+    cpus 1
+    time '5h'
 
     input:
     path(x)
@@ -147,9 +151,10 @@ process multiqc {
 
 process chunk_fastq {
 
-    maxForks 10
-    time '24h'
     container 'library://porchard/default/general:20220107'
+    memory '4 GB'
+    cpus 1
+    time '5h'
 
     input:
     tuple val(library), val(readgroup), val(read), path(fastq)
@@ -169,8 +174,10 @@ process chunk_fastq {
 // Trim/reverse complement barcode if necessary. Necessary transformation inferred based on naive comparison of barcode read to barcode whitelist.
 process transform_barcode {
 
-    publishDir "${params.results}/transformed-barcodes", mode: 'rellink'
+    publishDir "${params.results}/transformed-barcodes"
     tag "${library}-${readgroup}"
+    cpus 1
+    time '5h'
     memory '10 GB'
     container 'library://porchard/default/general:20220107'
 
@@ -189,9 +196,12 @@ process transform_barcode {
 
 process plot_whitelist_matching {
 
-    publishDir "${params.results}/plot-barcodes-matching-whitelist", mode: 'rellink'
+    publishDir "${params.results}/plot-barcodes-matching-whitelist"
     memory '10 GB'
+    cpus 1
+    time '24h'
     container 'library://porchard/default/general:20220107'
+    errorStrategy 'ignore'
 
     input:
     path(fastq)
@@ -209,10 +219,11 @@ process plot_whitelist_matching {
 
 process make_barcode_corrections {
 
-    publishDir "${params.results}/corrected-barcodes", mode: 'rellink', overwrite: true
+    publishDir "${params.results}/corrected-barcodes"
     tag "${library}"
     cpus 3
     memory '10 GB'
+    time '5h'
     container 'library://porchard/default/general:20220107'
 
     input:
@@ -230,12 +241,14 @@ process make_barcode_corrections {
 
 process trim {
 
-    publishDir "${params.results}/trim", mode: 'rellink', overwrite: true
+    publishDir "${params.results}/trim"
     errorStrategy 'retry'
     maxRetries 1
-    time '24h'
     tag "${library}-${readgroup}"
     container 'library://porchard/default/cta:20220113'
+    memory '4 GB'
+    cpus 1
+    time '5h'
 
     input:
     tuple val(library), val(readgroup), path(fastq_1), path(fastq_2), path(barcode)
@@ -252,9 +265,11 @@ process trim {
 
 process fastqc_post_trim {
 
-    publishDir "${params.results}/fastqc/after-trim", mode: 'rellink', overwrite: true
-    time '24h'
+    publishDir "${params.results}/fastqc/after-trim"
     container 'library://porchard/default/general:20220107'
+    memory '4 GB'
+    cpus 1
+    time '5h'
 
     input:
     tuple val(library), val(readgroup), val(read), path(fastq)
@@ -275,9 +290,11 @@ process fastqc_post_trim {
 
 process multiqc_post_trim {
 
-    publishDir "${params.results}/multiqc/after-trim", mode: 'rellink', overwrite: true
-    time '24h'
+    publishDir "${params.results}/multiqc/after-trim"
     container 'library://porchard/default/general:20220107'
+    memory '4 GB'
+    cpus 1
+    time '5h'
 
     input:
     path(x)
@@ -319,12 +336,13 @@ process bwa {
 process correct_barcodes_in_bam {
 
     tag "${library}-${readgroup}-${genome}"
-    publishDir "${params.results}/bwa-corrected-barcodes", mode: 'rellink', overwrite: true
+    publishDir "${params.results}/bwa-corrected-barcodes"
     memory { 30.GB * task.attempt }
     maxRetries 3
     errorStrategy 'retry'
     time '24h'
     container 'library://porchard/default/general:20220107'
+    cpus 1
 
     input:
     tuple val(library), val(readgroup), val(genome), path(bam), path(corrections)
@@ -342,9 +360,11 @@ process correct_barcodes_in_bam {
 process merge_readgroups {
 
     time '24h'
-    publishDir "${params.results}/merge", mode: 'rellink', overwrite: true
+    publishDir "${params.results}/merge"
     tag "${library} ${genome}"
     container 'library://porchard/default/general:20220107'
+    memory '4 GB'
+    cpus 1
 
     input:
     tuple val(library), val(genome), path(bams)
@@ -361,13 +381,14 @@ process merge_readgroups {
 
 process mark_duplicates {
 
-    publishDir "${params.results}/mark_duplicates", mode: 'rellink', overwrite: true
+    publishDir "${params.results}/mark_duplicates"
     errorStrategy 'retry'
     maxRetries 1
     time '24h'
     memory '50 GB'
     tag "${library} ${genome}"
     container 'library://porchard/default/general:20220107'
+    cpus 1
 
     input:
     tuple val(library), val(genome), path("${library}-${genome}.bam")
@@ -385,13 +406,14 @@ process mark_duplicates {
 
 process prune {
 
-    publishDir "${params.results}/prune", mode: 'rellink', overwrite: true
+    publishDir "${params.results}/prune"
     memory '3 GB'
     time '24h'
     errorStrategy 'retry'
     maxRetries 2
     tag "${library} ${genome}"
     container 'library://porchard/default/general:20220107'
+    cpus 1
 
     input:
     tuple val(library), val(genome), path(md_bam), path(bam_index)
@@ -408,10 +430,11 @@ process prune {
 
 process bamtobed {
 
-    time '4h'
-    maxForks 10
+    time '24h'
     tag "${library} ${genome}"
     container 'library://porchard/default/general:20220107'
+    memory '4 GB'
+    cpus 1
 
     input:
     tuple val(library), val(genome), path(bam)
@@ -428,13 +451,14 @@ process bamtobed {
 
 process macs2 {
 
-    publishDir "${params.results}/macs2", mode: 'rellink'
+    publishDir "${params.results}/macs2"
     time '24h'
     tag "${library} ${genome}"
     memory { 25.GB * task.attempt }
     maxRetries 2
     errorStrategy 'retry'
     container 'library://porchard/default/general:20220107'
+    cpus 1
 
     input:
     tuple val(library), val(genome), path(bed)
@@ -451,10 +475,12 @@ process macs2 {
 
 process blacklist_filter_peaks {
 
-    publishDir "${params.results}/macs2", mode: 'rellink'
-    time '1h'
+    publishDir "${params.results}/macs2"
+    time '3h'
     tag "${library} ${genome}"
     container 'library://porchard/default/general:20220107'
+    memory '4 GB'
+    cpus 1
 
     input:
     tuple val(library), val(genome), path(peaks)
@@ -475,12 +501,13 @@ process blacklist_filter_peaks {
 process bigwig {
 
     time '24h'
-    publishDir "${params.results}/bigwig", mode: 'rellink'
+    publishDir "${params.results}/bigwig"
     tag "${library} ${genome}"
     container 'library://porchard/default/general:20220107'
     memory { 20.GB * task.attempt }
     maxRetries 2
     errorStrategy 'retry'
+    cpus 1
 
     input:
     tuple val(library), val(genome), path(bedgraph)
@@ -500,12 +527,14 @@ process bigwig {
 
 process plot_signal_at_tss {
 
-    publishDir "${params.results}/bigwig/plot", mode: 'rellink', overwrite: true
+    publishDir "${params.results}/bigwig/plot"
     errorStrategy 'retry'
     maxRetries 1
     memory { 10.GB * task.attempt }
     tag "${genome}"
     container 'library://porchard/default/general:20220107'
+    cpus 1
+    time '24h'
 
     input:
     tuple val(genome), path(bw)
@@ -522,9 +551,11 @@ process plot_signal_at_tss {
 
 process chunk_single_nucleus_bams {
 
-    time '10h'
+    time '24h'
     tag "${library} ${genome}"
     container 'library://porchard/default/general:20220107'
+    memory '5 GB'
+    cpus 1
 
     input:
     tuple val(library), val(genome), path(md_bam), path(bam_index)
@@ -544,6 +575,8 @@ process index_chunked_single_nucleus_bams {
     time '4h'
     tag "${library} ${genome} chunk_${chunk}"
     container 'library://porchard/default/general:20220107'
+    memory '3 GB'
+    cpus 1
 
     input:
     tuple val(library), val(genome), val(chunk), path(bam)
@@ -560,13 +593,14 @@ process index_chunked_single_nucleus_bams {
 
 process ataqv_single_nucleus {
 
-    publishDir "${params.results}/ataqv/single-nucleus/json", mode: 'rellink', overwrite: true
+    publishDir "${params.results}/ataqv/single-nucleus/json"
     errorStrategy 'retry'
     maxRetries 1
     memory { 50.GB * task.attempt }
     time '10h'
     tag "${library} ${genome}"
     container 'library://porchard/default/ataqv:1.3.0'
+    cpus 1
 
     input:
     tuple val(library), val(genome), val(chunk), path(md_bam), path(bam_index)
@@ -587,6 +621,7 @@ process reformat_ataqv {
     time '10h'
     tag "${library} ${genome}"
     container 'library://porchard/default/general:20220107'
+    cpus 1
 
     input:
     tuple val(library), val(genome), path(json)
@@ -603,10 +638,12 @@ process reformat_ataqv {
 
 process concat_ataqv {
 
-    publishDir "${params.results}/ataqv/single-nucleus", mode: 'rellink', overwrite: true
+    publishDir "${params.results}/ataqv/single-nucleus"
     time '10h'
     tag "${library} ${genome}"
     container 'library://porchard/default/general:20220107'
+    memory '4 GB'
+    cpus 1
 
     input:
     tuple val(library), val(genome), path("ataqv.*.txt")
@@ -623,13 +660,14 @@ process concat_ataqv {
 
 process plot_qc_metrics {
 
-    publishDir "${params.results}/ataqv/single-nucleus", mode: 'rellink', overwrite: true
+    publishDir "${params.results}/ataqv/single-nucleus"
     time '10h'
     tag "${library} ${genome}"
     container 'library://porchard/default/dropkick:20220225'
     memory { 10.GB * task.attempt }
     maxRetries 1
     errorStrategy 'retry'
+    cpus 1
 
     input:
     tuple val(library), val(genome), path(metrics)
@@ -647,13 +685,14 @@ process plot_qc_metrics {
 
 process ataqv_bulk {
 
-    publishDir "${params.results}/ataqv/bulk", mode: 'rellink', overwrite: true
+    publishDir "${params.results}/ataqv/bulk"
     errorStrategy 'retry'
     maxRetries 1
     memory { 5.GB * task.attempt }
     time '10h'
     tag "${library} ${genome}"
     container 'library://porchard/default/ataqv:1.3.0'
+    cpus 1
 
     input:
     tuple val(library), val(genome), path(md_bam), path(bam_index), path(peaks)
@@ -671,13 +710,14 @@ process ataqv_bulk {
 
 process ataqv_bulk_viewer {
 
-    publishDir "${params.results}/ataqv/bulk", mode: 'rellink', overwrite: true
+    publishDir "${params.results}/ataqv/bulk"
     errorStrategy 'retry'
     maxRetries 1
     memory { 10.GB * task.attempt }
-    time '1h'
+    time '4h'
     tag "${genome}"
     container 'library://porchard/default/ataqv:1.3.0'
+    cpus 1
 
     input:
     tuple val(genome), path(json)
