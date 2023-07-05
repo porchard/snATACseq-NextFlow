@@ -427,6 +427,52 @@ process prune {
 
 }
 
+process index_pruned {
+
+    publishDir "${params.results}/prune"
+    memory '3 GB'
+    time '24h'
+    tag "${library} ${genome}"
+    container 'library://porchard/default/general:20220107'
+    cpus 1
+
+    input:
+    tuple val(library), val(genome), path(bam)
+
+    output:
+    tuple val(library), val(genome), path(bam), path("${bam}.bai")
+
+    """
+    ${IONICE} samtools index $bam
+    """
+
+}
+
+
+process make_fragment_file {
+
+    publishDir "${params.results}/fragment-file"
+    memory '30 GB'
+    time '72h'
+    tag "${library} ${genome}"
+    container "docker://porchard/sinto:20230623"
+    cpus 10
+
+    input:
+    tuple val(library), val(genome), path(bam), path(bam_index)
+
+    output:
+    tuple val(library), val(genome), path("${library}-${genome}.frags.bed.gz"), path("${library}-${genome}.frags.bed.gz.tbi")
+
+    """
+    sinto fragments -b $bam -f unsorted.frags.bed --collapse_within --nproc 10 --chunksize 5000000
+    sort --parallel=10 -S 25G -k 1,1 -k2,2n unsorted.frags.bed > ${library}-${genome}.frags.bed
+    bgzip ${library}-${genome}.frags.bed
+    tabix -p bed ${library}-${genome}.frags.bed.gz
+    rm unsorted.frags.bed
+    """
+
+}
 
 process bamtobed {
 
@@ -486,7 +532,7 @@ process blacklist_filter_peaks {
     tuple val(library), val(genome), path(peaks)
 
     output:
-    path("${library}-${genome}_peaks.broadPeak.noblacklist")
+    tuple val(library), val(genome), path("${library}-${genome}_peaks.broadPeak.noblacklist")
 
     when:
     has_blacklist(genome)
@@ -732,6 +778,29 @@ process ataqv_bulk_viewer {
 }
 
 
+process get_peak_counts {
+
+    publishDir "${params.results}/counts"
+    memory '75 GB'
+    time '48h'
+    tag "${library} ${genome}"
+    container 'library://porchard/default/general:20220107'
+    cpus 1
+
+    input:
+    tuple val(library), val(genome), path(fragments), path(fragments_index), path(peaks)
+
+    output:
+    path("${library}-${genome}.atac.*")
+
+    """
+    sort -k 1,1 -k2,2n $peaks > peaks.sorted.bed
+    fragment-file-to-peak-counts.py $fragments $peaks ${library}-${genome}.atac.
+    """
+
+}
+
+
 workflow {
 
     libraries = params.libraries.keySet()
@@ -792,11 +861,15 @@ workflow {
     // processed mapped
     bam_barcodes_corrected = mapped.combine(corrected_barcodes, by: 0) | correct_barcodes_in_bam
     md_bams = bam_barcodes_corrected.groupTuple(by: [0, 1], sort: true) | merge_readgroups | mark_duplicates
-    peak_calling = prune(md_bams) | bamtobed | macs2
-    blacklist_filter_peaks(peak_calling.peaks)
+    pruned = prune(md_bams)
+    fragment_file = index_pruned(pruned) | make_fragment_file
+    peak_calling = pruned | bamtobed | macs2
+    blacklist_filtered_peaks = blacklist_filter_peaks(peak_calling.peaks)
     bigwig(peak_calling.bedgraph).groupTuple() | plot_signal_at_tss
     sn_ataqv = (((md_bams | chunk_single_nucleus_bams).transpose().map({it -> [it[0], it[1], it[2].getName().tokenize('.')[-2].replaceAll('chunk', ''), it[2]]}) | index_chunked_single_nucleus_bams | ataqv_single_nucleus).json | reformat_ataqv).groupTuple(by: [0, 1]) | concat_ataqv | plot_qc_metrics
     ataqv_bulk(md_bams.combine(peak_calling.peaks, by: [0, 1])).json.groupTuple() | ataqv_bulk_viewer
+
+    fragment_file.combine(blacklist_filtered_peaks, by: [0, 1]) | get_peak_counts
 
     // plot fraction of barcodes matching whitelist (before )
     plot_whitelist_matching(transformed_barcodes.map({it -> it[2]}).toSortedList(), Channel.fromPath(params['barcode-whitelist']))
