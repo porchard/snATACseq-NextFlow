@@ -452,8 +452,8 @@ process index_pruned {
 process make_fragment_file {
 
     publishDir "${params.results}/fragment-file"
-    memory '30 GB'
-    time '72h'
+    memory '60 GB'
+    time '24h'
     tag "${library} ${genome}"
     container "docker://porchard/sinto:20230623"
     cpus 10
