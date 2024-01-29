@@ -11,9 +11,11 @@ Paths to various generic files (e.g., bwa indices) must be included in the nextf
 2. Chrom size files for each genome
 3. bwa indices (compatible with bwa v. 0.7.15)
 4. TSS files (BED6 files denoting TSS positions)
-5. Path to the barcode whitelist. The 10X ATAC v1 (737K-cratac-v1.txt) and 10X ATAC multiome (737K-arc-v1.txt) whitelists are included in this repo.
 
-You'll also need to set the params.results variable -- either in the nextflow.config file itself, or on the command line when you run the pipeline ('--results /path/to/results').
+When launching the pipeline, as shown in the `nextflow` command below, you'll also need to set the following:
+
+1. The location of the results directory (e.g., `--results /path/to/results`)
+2. The location of the barcode whitelist (e.g., `--barcode-whitelist /path/to/737K-arc-v1.txt`). The 10X ATAC v1 (737K-cratac-v1.txt) and 10X ATAC multiome (737K-arc-v1.txt) whitelists are included in this repo.
 
 You can split the fastq files into chunks using the --chunks parameter (default: 1, meaning no chunking). In the case of very large fastq files this can speed up processing.
 
@@ -25,10 +27,8 @@ Lastly, you'll need to include information about each ATAC-seq library, includin
 Once you have all of the above information, you can run the pipeline as follows (in this case, indicating the path to the results on the command line):
 
 ```bash
-nextflow run -resume -params-file library-config.json --results /path/to/results /path/to/main.nf
+nextflow run -resume -params-file library-config.json --barcode-whitelist /path/to/737K-arc-v1.txt --results /path/to/results /path/to/main.nf
 ```
-
-You may wish to run under nohup so that the pipeline continues to run in the background and does not terminate upon logging out of the server (`nohup nextflow run ... &`)
 
 ## Output
 * `ataqv/bulk/*.{json.gz,out}`: Pseudobulk ataqv output for each library
