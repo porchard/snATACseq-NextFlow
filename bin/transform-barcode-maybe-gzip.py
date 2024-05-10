@@ -23,9 +23,10 @@ COMPLEMENTS = {
     'N': 'N'
 }
 
+translation_table = str.maketrans('ACGTNacgtn', ''.join([COMPLEMENTS[x.upper()] for x in 'ACGTNacgtn']))
 
 def reverse_complement(s):
-    return ''.join([COMPLEMENTS[x.upper()] for x in s][::-1])
+    return s.translate(translation_table)[::-1]
 
 
 def open_maybe_gzipped(filename):
