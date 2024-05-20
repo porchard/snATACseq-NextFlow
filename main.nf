@@ -372,8 +372,11 @@ process merge_readgroups {
     output:
     tuple val(library), val(genome), path("${library}-${genome}.bam")
 
+    script:
+    cmd = (bams instanceof List && bams.size() > 1) ? "samtools merge ${library}-${genome}.bam ${bams.join(' ')}" : "ln -s ${bams[0]} ${library}-${genome}.bam"
+
     """
-    samtools merge ${library}-${genome}.bam ${bams.join(' ')}
+    $cmd
     """
 
 }
