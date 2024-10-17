@@ -29,7 +29,8 @@ def read_count_formatter(x, pos):
         return x
 
 
-qc = pd.read_csv(ATAQV_METRIC_FILE, sep='\t', names=['barcode', 'metric', 'value'], header=None).pivot(index='barcode', columns='metric', values='value')
+# qc = pd.read_csv(ATAQV_METRIC_FILE, sep='\t', names=['barcode', 'metric', 'value'], header=None).pivot(index='barcode', columns='metric', values='value')
+qc = pd.read_csv(ATAQV_METRIC_FILE, sep='\t').rename(columns={'name': 'barcode'})
 
 # try to infer HQAA threshold
 # do on logscale

@@ -179,16 +179,39 @@ process transform_barcode {
     cpus 1
     time '5h'
     memory '10 GB'
-    container 'library://porchard/default/general:20220107'
+    container 'docker://porchard/transform-and-count-barcodes:0243fea'
 
     input:
-    tuple val(library), val(readgroup), path(fastq)
+    tuple val(library), val(readgroup), path(fastq), path(whitelist)
 
     output:
-    tuple val(library), val(readgroup), path("${library}___${readgroup}.transformed-barcode.fastq.gz")
+    tuple val(library), val(readgroup), path("${library}___${readgroup}.transformed-barcode.fastq.gz"), emit: transformed
+    tuple val(library), path("${library}___${readgroup}.counts.txt"), emit: counts
 
     """
-    ${IONICE} transform-barcode-maybe-gzip.py --check-first 1000000 $fastq ${params['barcode-whitelist']} | gzip -c > ${library}___${readgroup}.transformed-barcode.fastq.gz
+    transform-and-count-barcodes $fastq $whitelist ${library}___${readgroup}.transformed-barcode.fastq.gz ${library}___${readgroup}.counts.txt
+    """
+
+}
+
+
+process correct_barcodes {
+
+    publishDir "${params.results}/corrected-barcodes"
+    tag "${library}"
+    memory '10 GB'
+    time '5h'
+    container 'docker://porchard/correct-snatac-barcodes:4000619'
+
+    input:
+    tuple val(library), val(readgroup), path(barcode_fastq), path("counts/?_counts.txt"), path(whitelist)
+
+    output:
+    tuple val(library), val(readgroup), path("${library}___${readgroup}.corrected.fastq.gz")
+
+    """
+    cat counts/* > counts.txt
+    correct-barcodes $barcode_fastq $whitelist counts.txt ${library}___${readgroup}.corrected.fastq.gz
     """
 
 }
@@ -205,35 +228,12 @@ process plot_whitelist_matching {
 
     input:
     path(fastq)
-    path(whitelist)
 
     output:
     path("barcode-whitelist-matches.png")
 
     """
-    plot-barcodes-matching-whitelist.py --whitelist $whitelist --fastq ${fastq.join(' ')}
-    """
-
-}
-
-
-process make_barcode_corrections {
-
-    publishDir "${params.results}/corrected-barcodes"
-    tag "${library}"
-    cpus 3
-    memory '10 GB'
-    time '5h'
-    container 'library://porchard/default/general:20220107'
-
-    input:
-    tuple val(library), path(barcode_fastq)
-
-    output:
-    tuple val(library), path("${library}.barcode_corrections.txt")
-
-    """
-    ${IONICE} correct-barcodes.py --threads 3 ${params['barcode-whitelist']} ${barcode_fastq.join(' ')} > ${library}.barcode_corrections.txt
+    plot-barcodes-matching-whitelist.py ${fastq.join(' ')}
     """
 
 }
@@ -245,7 +245,7 @@ process trim {
     errorStrategy 'retry'
     maxRetries 1
     tag "${library}-${readgroup}"
-    container 'library://porchard/default/cta:20220113'
+    container 'docker://porchard/cta:c97ac86'
     memory '4 GB'
     cpus 1
     time '5h'
@@ -257,7 +257,7 @@ process trim {
     tuple val(library), val(readgroup), path("${library}-${readgroup}.1.trimmed.fastq.gz"), path("${library}-${readgroup}.2.trimmed.fastq.gz")
 
     """
-    ${IONICE} cta --append-barcode $barcode $fastq_1 $fastq_2 ${library}-${readgroup}.1.trimmed.fastq.gz ${library}-${readgroup}.2.trimmed.fastq.gz
+    cta --strip-description --copy-description $barcode $fastq_1 $fastq_2 ${library}-${readgroup}.1.trimmed.fastq.gz ${library}-${readgroup}.2.trimmed.fastq.gz
     """
 
 }
@@ -324,34 +324,10 @@ process bwa {
     tuple val(library), val(genome), val(readgroup), path(fastq_1), path(fastq_2)
 
     output:
-    tuple val(library), val(readgroup), val(genome), path("${library}-${readgroup}-${genome}.bam")
+    tuple val(library), val(genome), path("${library}-${readgroup}-${genome}.bam")
 
     """
-    bwa mem -I 200,200,5000 -M -t 12 ${get_bwa_index(genome)} ${fastq_1} ${fastq_2} | samtools sort -m 1g -@ 11 -O bam -T sort_tmp -o ${library}-${readgroup}-${genome}.bam -
-    """
-
-}
-
-
-process correct_barcodes_in_bam {
-
-    tag "${library}-${readgroup}-${genome}"
-    publishDir "${params.results}/bwa-corrected-barcodes"
-    memory { 30.GB * task.attempt }
-    maxRetries 3
-    errorStrategy 'retry'
-    time '24h'
-    container 'library://porchard/default/general:20220107'
-    cpus 1
-
-    input:
-    tuple val(library), val(readgroup), val(genome), path(bam), path(corrections)
-
-    output:
-    tuple val(library), val(genome), path("${library}-${readgroup}-${genome}.corrected.bam")
-
-    """
-    correct-barcodes-in-bam.py $bam $corrections ${library}-${readgroup}-${genome}.corrected.bam
+    bwa mem -C -I 200,200,5000 -M -t 12 ${get_bwa_index(genome)} ${fastq_1} ${fastq_2} | samtools sort -m 1g -@ 11 -O bam -T sort_tmp -o ${library}-${readgroup}-${genome}.bam -
     """
 
 }
@@ -597,111 +573,46 @@ process plot_signal_at_tss {
 
 }
 
-
-process chunk_single_nucleus_bams {
-
-    time '24h'
-    tag "${library} ${genome}"
-    container 'library://porchard/default/general:20220107'
-    memory '5 GB'
-    cpus 1
-
-    input:
-    tuple val(library), val(genome), path(md_bam), path(bam_index)
-
-    output:
-    tuple val(library), val(genome), path("${library}-${genome}.chunk*.bam")
-
-    """
-    ${IONICE} chunk-bam-by-barcode.py $md_bam ${library}-${genome}.
-    """
-
-}
-
-
-process index_chunked_single_nucleus_bams {
-
-    time '4h'
-    tag "${library} ${genome} chunk_${chunk}"
-    container 'library://porchard/default/general:20220107'
-    memory '3 GB'
-    cpus 1
-
-    input:
-    tuple val(library), val(genome), val(chunk), path(bam)
-
-    output:
-    tuple val(library), val(genome), val(chunk), path(bam), path("${bam.getName() + '.bai'}")
-
-    """
-    samtools index $bam
-    """
-
-}
-
-
 process ataqv_single_nucleus {
 
-    publishDir "${params.results}/ataqv/single-nucleus/json"
+    publishDir "${params.results}/ataqv/single-nucleus"
     errorStrategy 'retry'
     maxRetries 1
     memory { 50.GB * task.attempt }
     time '10h'
     tag "${library} ${genome}"
-    container 'library://porchard/default/ataqv:1.3.0'
-    cpus 1
+    container 'docker://porchard/ataqv:1.4.0'
 
     input:
-    tuple val(library), val(genome), val(chunk), path(md_bam), path(bam_index)
+    tuple val(library), val(genome), path(md_bam), path(bam_index)
 
     output:
-    tuple val(library), val(genome), path("${library}-${genome}.chunk_${chunk}.ataqv.json.gz"), emit: json
-    path("${library}-${genome}.chunk_${chunk}.ataqv.out")
+    tuple val(library), val(genome), path("${library}-${genome}.ataqv.txt.gz"), emit: metrics
+    path("${library}-${genome}.ataqv.out")
 
     """
-    export TERM=xterm-256color && ataqv --name ${library}-${genome} --ignore-read-groups --nucleus-barcode-tag CB --metrics-file ${library}-${genome}.chunk_${chunk}.ataqv.json.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}.chunk_${chunk}.ataqv.out
-    """
-
-}
-
-process reformat_ataqv {
-
-    memory { 100.GB * task.attempt }
-    time '10h'
-    tag "${library} ${genome}"
-    container 'library://porchard/default/general:20220107'
-    cpus 1
-
-    input:
-    tuple val(library), val(genome), path(json)
-
-    output:
-    tuple val(library), val(genome), path("${library}-${genome}.txt")
-
-    """
-    extractAtaqvMetric.py --files $json > ${library}-${genome}.txt
+    ataqv --name ${library}-${genome} --tabular-output --ignore-read-groups --nucleus-barcode-tag CB --metrics-file ${library}-${genome}.ataqv.txt.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}.ataqv.out
     """
 
 }
 
 
-process concat_ataqv {
+process add_qc_metrics {
 
     publishDir "${params.results}/ataqv/single-nucleus"
-    time '10h'
+    time '1h'
     tag "${library} ${genome}"
     container 'library://porchard/default/general:20220107'
-    memory '4 GB'
-    cpus 1
+    memory "7 GB"
 
     input:
-    tuple val(library), val(genome), path("ataqv.*.txt")
+    tuple val(library), val(genome), path(metrics)
 
     output:
     tuple val(library), val(genome), path("${library}-${genome}.txt")
 
     """
-    cat ataqv.*.txt | cut -f2-4 > ${library}-${genome}.txt
+    add-metrics.py $metrics > ${library}-${genome}.txt
     """
 
 }
@@ -740,7 +651,7 @@ process ataqv_bulk {
     memory { 5.GB * task.attempt }
     time '10h'
     tag "${library} ${genome}"
-    container 'library://porchard/default/ataqv:1.3.0'
+    container 'docker://porchard/ataqv:1.4.0'
     cpus 1
 
     input:
@@ -751,7 +662,7 @@ process ataqv_bulk {
     path("${library}-${genome}.ataqv.out")
 
     """
-    export TERM=xterm-256color && ataqv --name ${library}-${genome} --peak-file $peaks --ignore-read-groups --metrics-file ${library}-${genome}.ataqv.json.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}.ataqv.out
+    ataqv --name ${library}-${genome} --peak-file $peaks --ignore-read-groups --metrics-file ${library}-${genome}.ataqv.json.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}.ataqv.out
     """
 
 }
@@ -765,7 +676,7 @@ process ataqv_bulk_viewer {
     memory { 10.GB * task.attempt }
     time '4h'
     tag "${genome}"
-    container 'library://porchard/default/ataqv:1.3.0'
+    container 'docker://porchard/ataqv:1.4.0'
     cpus 1
 
     input:
@@ -775,7 +686,7 @@ process ataqv_bulk_viewer {
     path("ataqv-viewer-${genome}")
 
     """
-    export TERM=xterm-256color && mkarv ataqv-viewer-${genome} ${json.join(' ')}
+    mkarv ataqv-viewer-${genome} ${json.join(' ')}
     """
 
 }
@@ -809,7 +720,6 @@ workflow {
     libraries = params.libraries.keySet()
 
     trim_in_inserts = []
-    transform_barcode_in = []
     fastqc_in = []
     chunk_fastq_in = []
     no_chunk_fastq_in = []
@@ -844,9 +754,13 @@ workflow {
     second_insert = fastq_in.filter({it -> it[2] == '2'}).map({it -> [it[0], it[1], it[3]]})
     barcodes = fastq_in.filter({it -> it[2] == 'barcode'}).map({it -> [it[0], it[1], it[3]]})
     
-    transformed_barcodes = transform_barcode(barcodes)
-    corrected_barcodes = transformed_barcodes.map({it -> [it[0], it[2]]}).groupTuple(sort: true) | make_barcode_corrections
-    trimmed = first_insert.combine(second_insert, by: [0, 1]).combine(transformed_barcodes, by: [0, 1]) | trim
+    whitelist = Channel.fromPath(params['barcode-whitelist'])
+
+    transformed_barcodes = transform_barcode(barcodes.combine(whitelist))
+    corrected_barcodes = transformed_barcodes.transformed.combine(transformed_barcodes.counts.groupTuple(by: 0), by: 0).combine(whitelist) | correct_barcodes
+    plot_whitelist_matching(corrected_barcodes.map({it -> it[2]}).toSortedList())
+
+    trimmed = first_insert.combine(second_insert, by: [0, 1]).combine(corrected_barcodes, by: [0, 1]) | trim
     
     // fastqc on trimmed barcodes
     (trimmed.map({it -> [it[0], it[1], ['1', '2'], [it[2], it[3]]]}).transpose() | fastqc_post_trim).flatten().toSortedList() | multiqc_post_trim
@@ -862,18 +776,14 @@ workflow {
     mapped = Channel.from(tmp).combine(trimmed, by: 0) | bwa
 
     // processed mapped
-    bam_barcodes_corrected = mapped.combine(corrected_barcodes, by: 0) | correct_barcodes_in_bam
-    md_bams = bam_barcodes_corrected.groupTuple(by: [0, 1], sort: true) | merge_readgroups | mark_duplicates
+    md_bams = mapped.groupTuple(by: [0, 1], sort: true) | merge_readgroups | mark_duplicates
     pruned = prune(md_bams)
     fragment_file = index_pruned(pruned) | make_fragment_file
     peak_calling = pruned | bamtobed | macs2
     blacklist_filtered_peaks = blacklist_filter_peaks(peak_calling.peaks)
     bigwig(peak_calling.bedgraph).groupTuple() | plot_signal_at_tss
-    sn_ataqv = (((md_bams | chunk_single_nucleus_bams).transpose().map({it -> [it[0], it[1], it[2].getName().tokenize('.')[-2].replaceAll('chunk', ''), it[2]]}) | index_chunked_single_nucleus_bams | ataqv_single_nucleus).json | reformat_ataqv).groupTuple(by: [0, 1]) | concat_ataqv | plot_qc_metrics
-    ataqv_bulk(md_bams.combine(peak_calling.peaks, by: [0, 1])).json.groupTuple() | ataqv_bulk_viewer
-
     fragment_file.combine(blacklist_filtered_peaks, by: [0, 1]) | get_peak_counts
 
-    // plot fraction of barcodes matching whitelist (before )
-    plot_whitelist_matching(transformed_barcodes.map({it -> it[2]}).toSortedList(), Channel.fromPath(params['barcode-whitelist']))
+    sn_ataqv = (md_bams | ataqv_single_nucleus).metrics | add_qc_metrics | plot_qc_metrics
+    ataqv_bulk(md_bams.combine(peak_calling.peaks, by: [0, 1])).json.groupTuple() | ataqv_bulk_viewer
 }
