@@ -33,7 +33,6 @@ nextflow run -resume -params-file library-config.json --barcode-whitelist /path/
 ## Output
 * `ataqv/bulk/*.{json.gz,out}`: Pseudobulk ataqv output for each library
 * `ataqv/bulk/ataqv-viewer-{genome}`: Pseudobulk ataqv HTML reports
-* `ataqv/single-nucleus/json/*`: ataqv json files for each library, chunked into subsets of barcodes
 * `ataqv/single-nucleus/*.png`: Plots of per-barcode ataqv metrics
 * `ataqv/single-nucleus/*.txt`: Per barcode ataqv metrics in txt format
 * `ataqv/single-nucleus/*.suggested-thresholds.tsv`: Suggested min HQAA threshold for the library, based on multi-otsu thresholding of the HQAA distribution
