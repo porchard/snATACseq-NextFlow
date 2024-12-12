@@ -178,8 +178,8 @@ process transform_barcode {
     tag "${library}-${readgroup}"
     cpus 1
     time '5h'
-    memory '10 GB'
-    container 'docker://porchard/transform-and-count-barcodes:0243fea'
+    memory '5 GB'
+    container 'docker://porchard/snatacseq-nextflow-barcodes:20241127'
 
     input:
     tuple val(library), val(readgroup), path(fastq), path(whitelist)
@@ -189,7 +189,7 @@ process transform_barcode {
     tuple val(library), path("${library}___${readgroup}.counts.txt"), emit: counts
 
     """
-    transform-and-count-barcodes $fastq $whitelist ${library}___${readgroup}.transformed-barcode.fastq.gz ${library}___${readgroup}.counts.txt
+    barcodes parse-barcodes --fastq-in $fastq --whitelist $whitelist --counts ${library}___${readgroup}.counts.txt --fastq-out ${library}___${readgroup}.transformed-barcode.fastq.gz
     """
 
 }
@@ -201,7 +201,7 @@ process correct_barcodes {
     tag "${library}"
     memory '10 GB'
     time '5h'
-    container 'docker://porchard/correct-snatac-barcodes:4000619'
+    container 'docker://porchard/snatacseq-nextflow-barcodes:20241127'
 
     input:
     tuple val(library), val(readgroup), path(barcode_fastq), path("counts/?_counts.txt"), path(whitelist)
@@ -211,7 +211,7 @@ process correct_barcodes {
 
     """
     cat counts/* > counts.txt
-    correct-barcodes $barcode_fastq $whitelist counts.txt ${library}___${readgroup}.corrected.fastq.gz
+    barcodes correct-barcodes --fastq-in $barcode_fastq --whitelist $whitelist --counts counts.txt --fastq-out ${library}___${readgroup}.corrected.fastq.gz --max-distance 1
     """
 
 }

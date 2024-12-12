@@ -42,7 +42,3 @@ nextflow run -resume -params-file library-config.json --barcode-whitelist /path/
 * `multiqc/*`: multiqc summaries of fastqc results, before and after adapter trimming
 * `prune/*`: Filtered bam files
 * `plot-barcodes-matching-whitelist`: Plot displaying percentage of barcodes matching barcode whitelist
-
-## Notes
-* [Code for barcode transformation](https://github.com/porchard/transform-and-count-barcodes)
-* [Code for barcode correction](https://github.com/porchard/correct-snatac-barcodes)

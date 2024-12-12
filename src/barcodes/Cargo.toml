@@ -1,0 +1,13 @@
+[package]
+name = "barcodes"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bio = "2"
+flate2 = "1.0.34"
+rapidfuzz = "0.5.0"
+itertools = "0.13.0"
+log = "0.4.22"
+env_logger = "0.11.5"
+clap = { version = "4.5.20", features = ["derive"] }
