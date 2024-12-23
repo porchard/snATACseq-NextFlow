@@ -34,11 +34,16 @@ nextflow run -resume -params-file library-config.json --barcode-whitelist /path/
 * `ataqv/bulk/*.{json.gz,out}`: Pseudobulk ataqv output for each library
 * `ataqv/bulk/ataqv-viewer-{genome}`: Pseudobulk ataqv HTML reports
 * `ataqv/single-nucleus/*.png`: Plots of per-barcode ataqv metrics
-* `ataqv/single-nucleus/*.txt`: Per barcode ataqv metrics in txt format
+* `ataqv/single-nucleus/*.txt.gz`: Per barcode ataqv metrics in txt format, as output by ataqv
+* `ataqv/single-nucleus/*.txt`: Per barcode ataqv metrics in txt format as output by ataqv, plus some additional metrics
 * `ataqv/single-nucleus/*.suggested-thresholds.tsv`: Suggested min HQAA threshold for the library, based on multi-otsu thresholding of the HQAA distribution
 * `bigwig/*.bw`: Pseudobulk bigwig files for each library
 * `bigwig/plot/*.png`: Pseudobulk ATAC signal at gene TSS for selected genes
+* `counts/*`: Peak count matrix (based on pseudobulk peaks)
+* `fastqc/*`: QC of raw sequencing reads
+* `fragment-file/*`: Tabixed fragment file generated with sinto
 * `macs2/*`: Pseudobulk peak calling results for each library
+* `mark_duplicates/*`: Unfiltered BAM files, with duplicates marked
 * `multiqc/*`: multiqc summaries of fastqc results, before and after adapter trimming
-* `prune/*`: Filtered bam files
 * `plot-barcodes-matching-whitelist`: Plot displaying percentage of barcodes matching barcode whitelist
+* `prune/*`: Filtered bam files
