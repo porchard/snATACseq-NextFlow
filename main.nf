@@ -3,8 +3,6 @@
 nextflow.enable.dsl=2
 params.chunks = 1
 
-IONICE = 'ionice -c2 -n7'
-
 // Generic data
 AUTOSOMAL_REFERENCES = ['hg19': (1..22).collect({it -> 'chr' + it}),
     'hg38': (1..22).collect({it -> 'chr' + it}),
@@ -149,32 +147,9 @@ process multiqc {
 }
 
 
-process chunk_fastq {
-
-    container 'library://porchard/default/general:20220107'
-    memory '4 GB'
-    cpus 1
-    time '5h'
-
-    input:
-    tuple val(library), val(readgroup), val(read), path(fastq)
-
-    output:
-    tuple val(library), val(readgroup), val(read), path("*.fastq")
-
-    when:
-    params.chunks > 1
-
-    """
-    chunk-fastq.py $fastq ${params.chunks} ${library}___${readgroup}.${read}.
-    """
-
-}
-
 // Trim/reverse complement barcode if necessary. Necessary transformation inferred based on naive comparison of barcode read to barcode whitelist.
 process transform_barcode {
 
-    publishDir "${params.results}/transformed-barcodes"
     tag "${library}-${readgroup}"
     cpus 1
     time '5h'
@@ -197,7 +172,6 @@ process transform_barcode {
 
 process correct_barcodes {
 
-    publishDir "${params.results}/corrected-barcodes"
     tag "${library}"
     memory '10 GB'
     time '5h'
@@ -239,12 +213,31 @@ process plot_whitelist_matching {
 }
 
 
-process trim {
+process chunk_fastq {
 
-    publishDir "${params.results}/trim"
+    container 'docker://porchard/snatacseq-nextflow-chunk-by-barcode:20241223'
+    memory '4 GB'
+    cpus 1
+    time '5h'
+
+    input:
+    tuple val(library), val(readgroup), path(read_1), path(read_2), path(barcodes), path(whitelist)
+
+    output:
+    tuple val(library), val(readgroup), path("*.fastq.gz")
+
+    """
+    chunk-by-barcode --n-chunks ${params.chunks} --read-1-fastq ${read_1} --read-2-fastq ${read_2} --barcode-fastq ${barcodes} --whitelist-file ${whitelist}
+    """
+
+}
+
+
+process trim_unchunked {
+
     errorStrategy 'retry'
     maxRetries 1
-    tag "${library}-${readgroup}"
+    tag "${library}-${readgroup}-${chunk}"
     container 'docker://porchard/cta:c97ac86'
     memory '4 GB'
     cpus 1
@@ -254,10 +247,33 @@ process trim {
     tuple val(library), val(readgroup), path(fastq_1), path(fastq_2), path(barcode)
 
     output:
-    tuple val(library), val(readgroup), path("${library}-${readgroup}.1.trimmed.fastq.gz"), path("${library}-${readgroup}.2.trimmed.fastq.gz")
+    tuple val(library), val(readgroup), val("chunk_1"), path("${library}-${readgroup}-chunk_1.1.trimmed.fastq.gz"), path("${library}-${readgroup}-chunk_1.2.trimmed.fastq.gz")
 
     """
-    cta --strip-description --copy-description $barcode $fastq_1 $fastq_2 ${library}-${readgroup}.1.trimmed.fastq.gz ${library}-${readgroup}.2.trimmed.fastq.gz
+    cta --strip-description --copy-description $barcode $fastq_1 $fastq_2 ${library}-${readgroup}-chunk_1.1.trimmed.fastq.gz ${library}-${readgroup}-chunk_1.2.trimmed.fastq.gz
+    """
+
+}
+
+
+process trim_chunked {
+
+    errorStrategy 'retry'
+    maxRetries 1
+    tag "${library}-${readgroup}-${chunk}"
+    container 'docker://porchard/cta:c97ac86'
+    memory '4 GB'
+    cpus 1
+    time '5h'
+
+    input:
+    tuple val(library), val(readgroup), val(chunk), path(fastq_1), path(fastq_2)
+
+    output:
+    tuple val(library), val(readgroup), val(chunk), path("${library}-${readgroup}-${chunk}.1.trimmed.fastq.gz"), path("${library}-${readgroup}-${chunk}.2.trimmed.fastq.gz")
+
+    """
+    cta $fastq_1 $fastq_2 ${library}-${readgroup}-${chunk}.1.trimmed.fastq.gz ${library}-${readgroup}-${chunk}.2.trimmed.fastq.gz
     """
 
 }
@@ -275,14 +291,12 @@ process fastqc_post_trim {
     tuple val(library), val(readgroup), val(read), path(fastq)
 
     output:
-    tuple path(outfile_1), path(outfile_2)
-
-    script:
-    outfile_1 = fastq.getName().replaceAll('.fastq.gz', '_fastqc.html')
-    outfile_2 = fastq.getName().replaceAll('.fastq.gz', '_fastqc.zip')
+    tuple path("${library}-${readgroup}.${read}_fastqc.html"), path("${library}-${readgroup}.${read}_fastqc.zip")
 
     """
-    fastqc $fastq
+    zcat ${fastq.join(' ')} | gzip -c > ${library}-${readgroup}.${read}.fastq.gz
+    fastqc ${library}-${readgroup}.${read}.fastq.gz
+    rm ${library}-${readgroup}.${read}.fastq.gz
     """
 
 }
@@ -317,17 +331,17 @@ process bwa {
     errorStrategy 'retry'
     maxRetries 1
     time '48h'
-    tag "${library}-${readgroup}-${genome}"
+    tag "${library}-${readgroup}-${chunk}-${genome}"
     container 'library://porchard/default/bwa:0.7.15'
 
     input:
-    tuple val(library), val(genome), val(readgroup), path(fastq_1), path(fastq_2)
+    tuple val(library), val(genome), val(readgroup), val(chunk), path(fastq_1), path(fastq_2)
 
     output:
-    tuple val(library), val(genome), path("${library}-${readgroup}-${genome}.bam")
+    tuple val(library), val(genome), val(chunk), path("${library}-${readgroup}-${chunk}-${genome}.bam")
 
     """
-    bwa mem -C -I 200,200,5000 -M -t 12 ${get_bwa_index(genome)} ${fastq_1} ${fastq_2} | samtools sort -m 1g -@ 11 -O bam -T sort_tmp -o ${library}-${readgroup}-${genome}.bam -
+    bwa mem -C -I 200,200,5000 -M -t 12 ${get_bwa_index(genome)} ${fastq_1} ${fastq_2} | samtools sort -m 1g -@ 11 -O bam -T sort_tmp -o ${library}-${readgroup}-${chunk}-${genome}.bam -
     """
 
 }
@@ -336,20 +350,19 @@ process bwa {
 process merge_readgroups {
 
     time '24h'
-    publishDir "${params.results}/merge"
-    tag "${library} ${genome}"
+    tag "${library} ${genome} ${chunk}"
     container 'library://porchard/default/general:20220107'
     memory '4 GB'
     cpus 1
 
     input:
-    tuple val(library), val(genome), path(bams)
+    tuple val(library), val(genome), val(chunk), path(bams)
 
     output:
-    tuple val(library), val(genome), path("${library}-${genome}.bam")
+    tuple val(library), val(genome), val(chunk), path("${library}-${genome}-${chunk}.bam")
 
     script:
-    cmd = (bams instanceof List && bams.size() > 1) ? "samtools merge ${library}-${genome}.bam ${bams.join(' ')}" : "ln -s ${bams[0]} ${library}-${genome}.bam"
+    cmd = (bams instanceof List && bams.size() > 1) ? "samtools merge ${library}-${genome}-${chunk}.bam ${bams.join(' ')}" : "ln -s ${bams[0]} ${library}-${genome}-${chunk}.bam"
 
     """
     $cmd
@@ -360,24 +373,48 @@ process merge_readgroups {
 
 process mark_duplicates {
 
-    publishDir "${params.results}/mark_duplicates"
     errorStrategy 'retry'
     maxRetries 1
     time '24h'
     memory '50 GB'
-    tag "${library} ${genome}"
+    tag "${library} ${genome} ${chunk}"
     container 'library://porchard/default/general:20220107'
     cpus 1
 
     input:
-    tuple val(library), val(genome), path("${library}-${genome}.bam")
+    tuple val(library), val(genome), val(chunk), path(bam)
 
     output:
-    tuple val(library), val(genome), path("${library}-${genome}.md.bam"), path("${library}-${genome}.md.bam.bai")
+    tuple val(library), val(genome), val(chunk), path("${library}-${genome}-${chunk}.md.bam"), path("${library}-${genome}-${chunk}.md.bam.bai")
 
     """
-    java -Xmx40g -Xms40g -jar \$PICARD_JAR MarkDuplicates TMP_DIR=. I=${library}-${genome}.bam O=${library}-${genome}.md.bam READ_ONE_BARCODE_TAG=CB READ_TWO_BARCODE_TAG=CB ASSUME_SORTED=true MAX_RECORDS_IN_RAM=10000000 METRICS_FILE=${library}-${genome}.metrics VALIDATION_STRINGENCY=LENIENT
-    samtools index ${library}-${genome}.md.bam
+    java -Xmx40g -Xms40g -jar \$PICARD_JAR MarkDuplicates TMP_DIR=. I=$bam O=${library}-${genome}-${chunk}.md.bam READ_ONE_BARCODE_TAG=CB READ_TWO_BARCODE_TAG=CB ASSUME_SORTED=true MAX_RECORDS_IN_RAM=10000000 METRICS_FILE=${library}-${genome}.metrics VALIDATION_STRINGENCY=LENIENT
+    samtools index ${library}-${genome}-${chunk}.md.bam
+    """
+
+}
+
+
+process merge_chunked_marked_duplicates {
+
+    publishDir "${params.results}/mark_duplicates"
+    time '24h'
+    tag "${library} ${genome}"
+    container 'library://porchard/default/general:20220107'
+    memory '4 GB'
+    cpus 1
+
+    input:
+    tuple val(library), val(genome), val(chunks), path(bams), path(indices)
+
+    output:
+    tuple val(library), val(genome), path("${library}-${genome}.bam"), path("${library}-${genome}.bam.bai")
+
+    script:
+    cmd = (bams instanceof List && bams.size() > 1) ? "samtools merge ${library}-${genome}.bam ${bams.join(' ')}; samtools index ${library}-${genome}.bam" : "ln -s ${bams[0]} ${library}-${genome}.bam; ln -s ${indices[0]} ${library}-${genome}.bam.bai"
+
+    """
+    $cmd
     """
 
 }
@@ -401,7 +438,7 @@ process prune {
     tuple val(library), val(genome), path("${library}-${genome}.pruned.bam")
 
     """
-    ${IONICE} samtools view -h -b -f 3 -F 4 -F 8 -F 256 -F 1024 -F 2048 -q 30 $md_bam ${AUTOSOMAL_REFERENCES[genome].join(' ')} > ${library}-${genome}.unsorted.bam && samtools sort -m 2G -o ${library}-${genome}.pruned.bam -T bam-sort -O BAM ${library}-${genome}.unsorted.bam
+    samtools view -h -f 3 -F 4 -F 8 -F 256 -F 1024 -F 2048 -q 30 $md_bam ${AUTOSOMAL_REFERENCES[genome].join(' ')} | samtools sort -m 2G -o ${library}-${genome}.pruned.bam -T bam-sort -O BAM
     """
 
 }
@@ -422,7 +459,7 @@ process index_pruned {
     tuple val(library), val(genome), path(bam), path("${bam}.bai")
 
     """
-    ${IONICE} samtools index $bam
+    samtools index $bam
     """
 
 }
@@ -575,23 +612,43 @@ process plot_signal_at_tss {
 
 process ataqv_single_nucleus {
 
-    publishDir "${params.results}/ataqv/single-nucleus"
     errorStrategy 'retry'
     maxRetries 1
     memory { 50.GB * task.attempt }
     time '10h'
-    tag "${library} ${genome}"
+    tag "${library} ${genome} ${chunk}"
     container 'docker://porchard/ataqv:1.4.0'
 
     input:
-    tuple val(library), val(genome), path(md_bam), path(bam_index)
+    tuple val(library), val(genome), val(chunk), path(md_bam), path(bam_index)
 
     output:
-    tuple val(library), val(genome), path("${library}-${genome}.ataqv.txt.gz"), emit: metrics
-    path("${library}-${genome}.ataqv.out")
+    tuple val(library), val(genome), path("${library}-${genome}-${chunk}.ataqv.txt.gz")
 
     """
-    ataqv --name ${library}-${genome} --tabular-output --ignore-read-groups --nucleus-barcode-tag CB --metrics-file ${library}-${genome}.ataqv.txt.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}.ataqv.out
+    ataqv --name ${library}-${genome} --tabular-output --ignore-read-groups --nucleus-barcode-tag CB --metrics-file ${library}-${genome}-${chunk}.ataqv.txt.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}-${chunk}.ataqv.out
+    """
+
+}
+
+
+process merge_chunked_ataqv_single_nucleus {
+
+    publishDir "${params.results}/ataqv/single-nucleus"
+    errorStrategy 'retry'
+    maxRetries 1
+    time '1h'
+    tag "${library} ${genome}"
+
+    input:
+    tuple val(library), val(genome), path(metrics)
+
+    output:
+    tuple val(library), val(genome), path("${library}-${genome}.ataqv.txt.gz")
+
+    """
+    zcat ${metrics[0]} | awk 'NR==1' > header.txt
+    zcat ${metrics.join(' ')} | grep -v -f header.txt | cat header.txt - | gzip > ${library}-${genome}.ataqv.txt.gz
     """
 
 }
@@ -719,51 +776,45 @@ workflow {
 
     libraries = params.libraries.keySet()
 
-    trim_in_inserts = []
-    fastqc_in = []
-    chunk_fastq_in = []
-    no_chunk_fastq_in = []
+    first_insert = []
+    second_insert = []
+    barcodes = []
 
     for (library in libraries) {
         for (readgroup in library_to_readgroups(library)) {
             fastqs = library_and_readgroup_to_fastqs(library, readgroup)
-            first_insert = fastqs['1']
-            second_insert = fastqs['2']
-            barcode = fastqs['index']
-            if (params.chunks > 1) {
-                chunk_fastq_in << [library, readgroup, "barcode", file(barcode)]
-                chunk_fastq_in << [library, readgroup, "1", file(first_insert)]
-                chunk_fastq_in << [library, readgroup, "2", file(second_insert)]
-            } else {
-                no_chunk_fastq_in << [library, readgroup, "barcode", file(barcode)]
-                no_chunk_fastq_in << [library, readgroup, "1", file(first_insert)]
-                no_chunk_fastq_in << [library, readgroup, "2", file(second_insert)]
-            }
-            fastqc_in << [library, readgroup, "1", file(first_insert)]
-            fastqc_in << [library, readgroup, "2", file(second_insert)]
-            fastqc_in << [library, readgroup, "barcode", file(barcode)]
+            
+            first_insert << [library, readgroup, file(fastqs['1'])]
+            second_insert << [library, readgroup, file(fastqs['2'])]
+            barcodes << [library, readgroup, file(fastqs['index'])]
         }
     }
 
-    fastqc(Channel.from(fastqc_in)).flatten().toSortedList() | multiqc
-
-    // handle the chunking
-    chunked_out = chunk_fastq(Channel.from(chunk_fastq_in)).transpose().map({it -> [it[0], it[1] + "___" + it[3].getName().tokenize('.')[-2], it[2], it[3]]})
-    fastq_in = chunked_out.mix(Channel.from(no_chunk_fastq_in))
-    first_insert = fastq_in.filter({it -> it[2] == '1'}).map({it -> [it[0], it[1], it[3]]})
-    second_insert = fastq_in.filter({it -> it[2] == '2'}).map({it -> [it[0], it[1], it[3]]})
-    barcodes = fastq_in.filter({it -> it[2] == 'barcode'}).map({it -> [it[0], it[1], it[3]]})
-    
+    first_insert = Channel.from(first_insert)
+    second_insert = Channel.from(second_insert)
+    barcodes = Channel.from(barcodes)
     whitelist = Channel.fromPath(params['barcode-whitelist'])
+
+    fastqc(first_insert.map({it -> [it[0], it[1], "1", it[2]]}).mix(second_insert.map({it -> [it[0], it[1], "2", it[2]]})).mix(barcodes.map({it -> [it[0], it[1], "barcode", it[2]]}))).flatten().toSortedList() | multiqc
 
     transformed_barcodes = transform_barcode(barcodes.combine(whitelist))
     corrected_barcodes = transformed_barcodes.transformed.combine(transformed_barcodes.counts.groupTuple(by: 0), by: 0).combine(whitelist) | correct_barcodes
     plot_whitelist_matching(corrected_barcodes.map({it -> it[2]}).toSortedList())
 
-    trimmed = first_insert.combine(second_insert, by: [0, 1]).combine(corrected_barcodes, by: [0, 1]) | trim
+
+    if (params.chunks > 1) {
+        chunked = first_insert.combine(second_insert, by: [0, 1]).combine(corrected_barcodes, by: [0, 1]).combine(whitelist) | chunk_fastq
+        chunked = chunked.transpose()
+        chunked = chunked.map({it -> [it[0], it[1], it[2].getName().tokenize('.')[0], it[2].getName().tokenize('.')[1], it[2]]})
+        chunked_read_1 = chunked.filter({it -> it[2] == 'R1'}).map({it -> [it[0], it[1], it[3], it[4]]})
+        chunked_read_2 = chunked.filter({it -> it[2] == 'R2'}).map({it -> [it[0], it[1], it[3], it[4]]})
+        trimmed = chunked_read_1.combine(chunked_read_2, by: [0, 1, 2]) | trim_chunked
+    } else {
+        trimmed = first_insert.combine(second_insert, by: [0, 1]).combine(corrected_barcodes, by: [0, 1]) | trim_unchunked
+    }
+
     
-    // fastqc on trimmed barcodes
-    (trimmed.map({it -> [it[0], it[1], ['1', '2'], [it[2], it[3]]]}).transpose() | fastqc_post_trim).flatten().toSortedList() | multiqc_post_trim
+    (trimmed.map({it -> [it[0], it[1], ['1', '2'], [it[3], it[3]]]}).transpose().groupTuple(by: [0, 1, 2]) | fastqc_post_trim).flatten().toSortedList() | multiqc_post_trim
 
     // map
     tmp = []
@@ -776,14 +827,15 @@ workflow {
     mapped = Channel.from(tmp).combine(trimmed, by: 0) | bwa
 
     // processed mapped
-    md_bams = mapped.groupTuple(by: [0, 1], sort: true) | merge_readgroups | mark_duplicates
+    chunked_md_bams = mapped.groupTuple(by: [0, 1, 2], sort: true) | merge_readgroups | mark_duplicates
+    md_bams = merge_chunked_marked_duplicates(chunked_md_bams.groupTuple(by: [0, 1]))
     pruned = prune(md_bams)
     fragment_file = index_pruned(pruned) | make_fragment_file
-    peak_calling = pruned | bamtobed | macs2
+    peak_calling = bamtobed(pruned) | macs2
     blacklist_filtered_peaks = blacklist_filter_peaks(peak_calling.peaks)
     bigwig(peak_calling.bedgraph).groupTuple() | plot_signal_at_tss
     fragment_file.combine(blacklist_filtered_peaks, by: [0, 1]) | get_peak_counts
 
-    sn_ataqv = (md_bams | ataqv_single_nucleus).metrics | add_qc_metrics | plot_qc_metrics
+    sn_ataqv = (chunked_md_bams | ataqv_single_nucleus).groupTuple(by: [0, 1]) | merge_chunked_ataqv_single_nucleus | add_qc_metrics | plot_qc_metrics
     ataqv_bulk(md_bams.combine(peak_calling.peaks, by: [0, 1])).json.groupTuple() | ataqv_bulk_viewer
 }

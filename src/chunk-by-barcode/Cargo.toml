@@ -1,0 +1,14 @@
+[package]
+name = "chunk-by-barcode"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bio = "2"
+flate2 = "1.0.34"
+itertools = "0.13.0"
+log = "0.4.22"
+env_logger = "0.11.5"
+clap = { version = "4.5.20", features = ["derive"] }
+regex = "1.11.1"
+once_cell = "1.20.2"
