@@ -617,7 +617,7 @@ process ataqv_single_nucleus {
     memory { 50.GB * task.attempt }
     time '10h'
     tag "${library} ${genome} ${chunk}"
-    container 'docker://porchard/ataqv:1.4.0'
+    container 'docker://porchard/ataqv:1.5.0'
 
     input:
     tuple val(library), val(genome), val(chunk), path(md_bam), path(bam_index)
@@ -626,7 +626,7 @@ process ataqv_single_nucleus {
     tuple val(library), val(genome), path("${library}-${genome}-${chunk}.ataqv.txt.gz")
 
     """
-    ataqv --name ${library}-${genome} --tabular-output --ignore-read-groups --nucleus-barcode-tag CB --metrics-file ${library}-${genome}-${chunk}.ataqv.txt.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}-${chunk}.ataqv.out
+    ataqv --name ${library}-${genome} --ignore-read-groups --nucleus-barcode-tag CB --metrics-file ${library}-${genome}-${chunk}.ataqv.txt.gz --tss-file ${get_tss(genome)} ${make_excluded_regions_arg(genome)} ${get_organism(genome)} $md_bam > ${library}-${genome}-${chunk}.ataqv.out
     """
 
 }
@@ -708,7 +708,7 @@ process ataqv_bulk {
     memory { 5.GB * task.attempt }
     time '10h'
     tag "${library} ${genome}"
-    container 'docker://porchard/ataqv:1.4.0'
+    container 'docker://porchard/ataqv:1.5.0'
     cpus 1
 
     input:
