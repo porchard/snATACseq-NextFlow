@@ -614,7 +614,7 @@ process ataqv_single_nucleus {
 
     errorStrategy 'retry'
     maxRetries 1
-    memory { 50.GB * task.attempt }
+    memory { 5.GB * task.attempt }
     time '10h'
     tag "${library} ${genome} ${chunk}"
     container 'docker://porchard/ataqv:1.5.0'
