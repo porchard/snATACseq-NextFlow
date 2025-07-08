@@ -106,7 +106,7 @@ process fastqc {
     container 'library://porchard/default/general:20220107'
     memory '4 GB'
     cpus 1
-    time '5h'
+    time '24h'
 
     input:
     tuple val(library), val(readgroup), val(read), path(fastq)
@@ -152,7 +152,7 @@ process transform_barcode {
 
     tag "${library}-${readgroup}"
     cpus 1
-    time '5h'
+    time '24h'
     memory '5 GB'
     container 'docker://porchard/snatacseq-nextflow-barcodes:20250702'
 
@@ -176,6 +176,7 @@ process correct_barcodes {
     memory '10 GB'
     time '24h'
     container 'docker://porchard/snatacseq-nextflow-barcodes:20250702'
+    label 'largemem'
 
     input:
     tuple val(library), val(readgroup), path(barcode_fastq), path("counts/?_counts.txt"), path(whitelist)
@@ -218,7 +219,7 @@ process chunk_fastq {
     container 'docker://porchard/snatacseq-nextflow-chunk-by-barcode:20241223'
     memory '4 GB'
     cpus 1
-    time '5h'
+    time '24h'
 
     input:
     tuple val(library), val(readgroup), path(read_1), path(read_2), path(barcodes), path(whitelist)
@@ -241,7 +242,7 @@ process trim_unchunked {
     container 'docker://porchard/cta:c97ac86'
     memory '4 GB'
     cpus 1
-    time '5h'
+    time '24h'
 
     input:
     tuple val(library), val(readgroup), path(fastq_1), path(fastq_2), path(barcode)
@@ -264,7 +265,7 @@ process trim_chunked {
     container 'docker://porchard/cta:c97ac86'
     memory '4 GB'
     cpus 1
-    time '5h'
+    time '24h'
 
     input:
     tuple val(library), val(readgroup), val(chunk), path(fastq_1), path(fastq_2)
@@ -285,7 +286,7 @@ process fastqc_post_trim {
     container 'library://porchard/default/general:20220107'
     memory '4 GB'
     cpus 1
-    time '5h'
+    time '24h'
 
     input:
     tuple val(library), val(readgroup), val(read), path(fastq)
@@ -330,9 +331,10 @@ process bwa {
     cpus 12
     errorStrategy 'retry'
     maxRetries 1
-    time '48h'
+    time '72h'
     tag "${library}-${readgroup}-${chunk}-${genome}"
     container 'library://porchard/default/bwa:0.7.15'
+    label 'largemem'
 
     input:
     tuple val(library), val(genome), val(readgroup), val(chunk), path(fastq_1), path(fastq_2)
@@ -380,6 +382,7 @@ process mark_duplicates {
     tag "${library} ${genome} ${chunk}"
     container 'library://porchard/default/general:20220107'
     cpus 1
+    label 'largemem'
 
     input:
     tuple val(library), val(genome), val(chunk), path(bam)
@@ -521,6 +524,7 @@ process macs2 {
     errorStrategy 'retry'
     container 'library://porchard/default/general:20220107'
     cpus 1
+    label 'largemem'
 
     input:
     tuple val(library), val(genome), path(bed)
@@ -570,6 +574,7 @@ process bigwig {
     maxRetries 2
     errorStrategy 'retry'
     cpus 1
+    label 'largemem'
 
     input:
     tuple val(library), val(genome), path(bedgraph)
@@ -615,7 +620,7 @@ process ataqv_single_nucleus {
     errorStrategy 'retry'
     maxRetries 1
     memory { 5.GB * task.attempt }
-    time '10h'
+    time '24h'
     tag "${library} ${genome} ${chunk}"
     container 'docker://porchard/ataqv:1.5.0'
 
@@ -706,7 +711,7 @@ process ataqv_bulk {
     errorStrategy 'retry'
     maxRetries 1
     memory { 5.GB * task.attempt }
-    time '10h'
+    time '24h'
     tag "${library} ${genome}"
     container 'docker://porchard/ataqv:1.5.0'
     cpus 1
@@ -752,11 +757,13 @@ process ataqv_bulk_viewer {
 process get_peak_counts {
 
     publishDir "${params.results}/counts"
-    memory '75 GB'
+    memory { 75.GB * task.attempt }
     time '48h'
     tag "${library} ${genome}"
     container 'library://porchard/default/general:20220107'
     cpus 1
+    label 'largemem'
+    maxRetries 2
 
     input:
     tuple val(library), val(genome), path(fragments), path(fragments_index), path(peaks)
