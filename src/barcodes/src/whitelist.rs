@@ -7,7 +7,7 @@ pub fn read_whitelist(file: &str) -> HashSet<String> {
     let mut whitelist_file = File::open(file).unwrap();
     let mut whitelist: String = String::new();
     whitelist_file.read_to_string(&mut whitelist).unwrap();
-    let whitelist: HashSet<String> = whitelist.split("\n").map(|s| s.trim_end().to_string()).collect();
+    let whitelist: HashSet<String> = whitelist.trim_end().split("\n").map(|s| s.trim_end().to_string()).collect();
     whitelist
 }
 

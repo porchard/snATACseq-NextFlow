@@ -154,7 +154,7 @@ process transform_barcode {
     cpus 1
     time '5h'
     memory '5 GB'
-    container 'docker://porchard/snatacseq-nextflow-barcodes:20241127'
+    container 'docker://porchard/snatacseq-nextflow-barcodes:20250702'
 
     input:
     tuple val(library), val(readgroup), path(fastq), path(whitelist)
@@ -174,8 +174,8 @@ process correct_barcodes {
 
     tag "${library}"
     memory '10 GB'
-    time '5h'
-    container 'docker://porchard/snatacseq-nextflow-barcodes:20241127'
+    time '24h'
+    container 'docker://porchard/snatacseq-nextflow-barcodes:20250702'
 
     input:
     tuple val(library), val(readgroup), path(barcode_fastq), path("counts/?_counts.txt"), path(whitelist)
