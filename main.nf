@@ -60,8 +60,8 @@ def is_chimeric (library) {
 }
 
 
-def get_bwa_index (genome) {
-    return params.bwa_index[genome]
+def get_minibwa_index (genome) {
+    return params.minibwa_index[genome]
 }
 
 
@@ -325,7 +325,7 @@ process multiqc_post_trim {
 }
 
 
-process bwa {
+process minibwa {
 
     memory '50 GB'
     cpus 12
@@ -333,8 +333,8 @@ process bwa {
     maxRetries 1
     time '72h'
     tag "${library}-${readgroup}-${chunk}-${genome}"
-    container 'library://porchard/default/bwa:0.7.15'
-    label 'largemem'
+    container 'docker://porchard//minibwa:0.7'
+    //label 'largemem'
 
     input:
     tuple val(library), val(genome), val(readgroup), val(chunk), path(fastq_1), path(fastq_2)
@@ -343,7 +343,7 @@ process bwa {
     tuple val(library), val(genome), val(chunk), path("${library}-${readgroup}-${chunk}-${genome}.bam")
 
     """
-    bwa mem -C -I 200,200,5000 -M -t 12 ${get_bwa_index(genome)} ${fastq_1} ${fastq_2} | samtools sort -m 1g -@ 11 -O bam -T sort_tmp -o ${library}-${readgroup}-${chunk}-${genome}.bam -
+    minibwa map -y -I 200,200,5000 -t 12 ${get_minibwa_index(genome)} ${fastq_1} ${fastq_2} | samtools sort -m 1g -@ 11 -O bam -T sort_tmp -o ${library}-${readgroup}-${chunk}-${genome}.bam -
     """
 
 }
@@ -831,7 +831,7 @@ workflow {
         }
     }
 
-    mapped = Channel.from(tmp).combine(trimmed, by: 0) | bwa
+    mapped = Channel.from(tmp).combine(trimmed, by: 0) | minibwa
 
     // processed mapped
     chunked_md_bams = mapped.groupTuple(by: [0, 1, 2], sort: true) | merge_readgroups | mark_duplicates
